@@ -1,148 +1,192 @@
 difff《ﾃﾞｭﾌﾌ》
 ======================
 
-**difff** is a simple, web-based online tool for comparing two text files.  
-The software is open source, and freely available to all users.  
-English version of difff: https://difff.jp/en/
-
 ウェブベースのテキスト比較ツールです。2つのテキストの差分をハイライト表示します。  
-本ソフトウェアはオープンソースであり、誰でも無償で自由に利用することができます。  
-difff《ﾃﾞｭﾌﾌ》稼働中： https://difff.jp/
+日本語版に加え、英語版も公開されています（英語版URL: https://difff.jp/en/）。
 
-![スクリーンショット](http://data.dbcls.jp/~meso/img/difff6.png
-"difff《ﾃﾞｭﾌﾌ》スクリーンショット")
+稼働中サービス: https://difff.jp/
 
-作者が管理している
-[difff《ﾃﾞｭﾌﾌ》のウェブサイト](https://difff.jp/)
-はどなたでも無償で利用でき、入力テキストも一切サーバに残りませんが、
-部外秘の文書をどうしても社内のサーバで ﾃﾞｭﾌﾌ したいというような要望が
-多かったため、ソースを公開することにしました。どうぞご利用ください。
+![スクリーンショット](http://data.dbcls.jp/~meso/img/difff6.png "difff《ﾃﾞｭﾌﾌ》スクリーンショット")
 
-difff《ﾃﾞｭﾌﾌ》は差分検出にUNIXのdiffコマンドを利用しています。
-diffコマンドは2つのファイルの差分を行単位で検出するプログラムです。
-しかし、比較する文書をいったんファイルに書き出すのは秘匿性の点から
-好ましくないので、difff《ﾃﾞｭﾌﾌ》ではファイルを書き出すのではなく
-FIFO（名前付きパイプ）を作成してdiffコマンドに文書を渡しています。
+## まず最初に（最短セットアップ）
 
+`difff.pl` は既存のテキスト比較に加えて、PDF2本アップロード比較（日本語版のみ）をサポートします。  
+Python補助処理は **すべて `uv run` 経由** で実行します。
 
-動作環境
-------
+### 前提コマンド
 
-+ PerlのCGIが動作すること
-+ UNIXのdiffコマンドが実行可能であること
-+ FIFOを作成可能な、apacheからの書き込み権限のあるディレクトリがあること  
-  ※ diffコマンドで文書を比較する際にFIFO（名前付きパイプ）を作成します。
+- `perl`（CGI実行用）
+- `diff`（既存テキスト差分）
+- `pdftotext`（PDFモード必須。`-bbox-layout` を使用）
+- `uv`（Python補助処理の実行）
 
+### セットアップ
 
-インストール
-------
+```bash
+cd /path/to/difff-pdf
 
-difff《ﾃﾞｭﾌﾌ》は単一のCGIスクリプト（difff.pl）です。
-本ファイルをウェブ公開用のディレクトリに置き、index.cgi にリンクします。
-もしくは、difff.pl を index.cgi に名前変更して置いてもかまいません。
-スクリプトには、apacheから読み出し・実行できる権限を与えてください。
+# Python依存を同期（tools/pyproject.toml + uv.lock）
+uv sync --project tools --offline --no-python-downloads || uv sync --project tools
+```
 
-また、スクリプトの下記の部分を環境にあわせて書き換えてください。
+オフライン運用時は、事前に必要ホイールをキャッシュしてから `--offline` を使ってください。
+
+### 開発用に起動
+
+```bash
+cd /path/to/difff-pdf
+
+# http.server --cgi は /cgi-bin 配下のみ CGI 実行するため、起動前にリンクを作る
+mkdir -p cgi-bin
+ln -sf ../difff.pl cgi-bin/difff.pl
+ln -sf ../index.cgi cgi-bin/index.cgi
+ln -sf ../save.cgi cgi-bin/save.cgi
+ln -sf ../delete.cgi cgi-bin/delete.cgi
+
+uv run --project tools python -m http.server --cgi 8000
+```
+
+ブラウザで以下にアクセスします。
+
+- `http://localhost:8000/cgi-bin/difff.pl`
+- または `http://localhost:8000/cgi-bin/index.cgi`
+
+必要に応じて送信先を固定したい場合は、起動前に以下を指定します。
+
+```bash
+export DIFFF_BASE_URL='http://localhost:8000/cgi-bin/'
+```
+
+## 動作確認手順（立ち上げ確認を兼ねる）
+
+### 1. テキスト比較（既存モード）
+
+1. 画面上部のテキスト入力欄にA/Bを入力する  
+2. 「比較」を実行する  
+3. 差分ハイライトと文字数カウンタが表示されることを確認する
+
+### 2. PDF比較（GUI）
+
+同じ画面内のPDFフォーム（`pdfA` / `pdfB`）で2本を指定して比較します。  
+成功すると、差分HTMLに加えて次のリンクが表示されます。
+
+- `annA.pdf`（A側の削除注釈）
+- `annB.pdf`（B側の追加注釈）
+- `annComment.pdf`（Aベース: 削除取り消し線 + 追加コメント注釈）
+
+### 3. CLIスモークテスト（テキスト）
+
+```bash
+cd /path/to/difff-pdf
+export QUERY_STRING="sequenceA=hogehoge&sequenceB=hagehage"
+./index.cgi
+```
+
+先頭が `Content-type: text/html; charset=utf-8`、2行目が空行、3行目以降がHTMLなら基本動作OKです。
+
+### 4. Python補助スクリプトの構文確認（uv統一）
+
+```bash
+cd /path/to/difff-pdf
+uv run --project tools python -m py_compile tools/pdf_annotate_diff.py
+```
+
+## PDFモード仕様（日本語版のみ）
+
+- 対象: `/Users/kh/MyWorkspace/difff-pdf/difff.pl`（英語版 `/Users/kh/MyWorkspace/difff-pdf/en/` は非対象）
+- 入力: `pdfA` と `pdfB` の両方が指定された場合のみ有効
+- 差分計算:
+  - `pdftotext -bbox-layout` の **XHTML** を起点に再構成テキストを作成
+  - 既存 `split_text` に通して比較（テキストモードと同じ分割規則）
+- 注釈成果物:
+  - `annotatedA.pdf`
+  - `annotatedB.pdf`
+  - `annotatedComment.pdf`
+- 失敗時方針:
+  - bbox対応不能はベストエフォート（差分HTMLは返す）
+  - 実行失敗はエラーメッセージを返す
+
+## 環境変数
+
+| 変数名 | 既定値 | 用途 |
+|---|---:|---|
+| `DIFFF_PDF_MAX_MB` | `50` | PDF1ファイルあたりの上限サイズ（MB） |
+| `DIFFF_TEXT_MAX_CHARS` | `5000000` | 抽出後テキスト長の上限 |
+| `DIFFF_PDFTOTEXT_CMD` | `/opt/homebrew/bin/pdftotext` | `pdftotext` 実行パス |
+| `DIFFF_PDFTOTEXT_TIMEOUT_SEC` | `60` | `pdftotext` 実行タイムアウト秒 |
+| `DIFFF_UV_CMD` | `/opt/homebrew/bin/uv` | `uv` 実行パス |
+| `DIFFF_UV_TIMEOUT_SEC` | `60` | `uv run` 実行タイムアウト秒 |
+| `DIFFF_BASE_URL` | （自動判定） | CGIフォーム送信先のベースURL（末尾 `/` 推奨） |
+| `DIFFF_RETENTION_DAYS` | `3` | 公開結果の保持日数 |
+| `DIFFF_TMP_TTL_MINUTES` | `120` | `data/tmp` 一時成果物の保持分 |
+| `UV_PYTHON` | （任意） | `uv` で使うPythonを固定したい場合に指定 |
+
+## 保存される成果物
+
+PDF比較結果を公開保存すると、HTMLに加えて以下5ファイルを保存します。
+
+- `srcA.pdf`
+- `srcB.pdf`
+- `annA.pdf`
+- `annB.pdf`
+- `annComment.pdf`
+
+保存先 `data/` には、Webサーバからの読み書き権限を付与してください。  
+保持期間を過ぎた成果物は自動削除されます（`DIFFF_RETENTION_DAYS`）。
+
+## 従来の設置ポイント（CGI）
+
+`difff.pl` はCGIスクリプトです。`index.cgi` から呼び出すか、`difff.pl` を公開対象として配置します。  
+主に以下を環境に合わせて調整してください。
 
 ```perl
 #!/usr/bin/perl
+my $url = 'https://example.com/' ;  # 保存結果から再投稿するための送信先
+my $diffcmd = '/usr/bin/diff' ;
+my $fifodir = '/tmp' ;
 ```
 
-↑ Perlのパスを調べて記載してください。
+- `$url` は保存HTMLから再実行する運用が不要なら `./` でも可
+- `$fifodir` はWebサーバユーザーがFIFOを作成できるディレクトリを指定
 
-```perl
-# 保存したHTMLファイルから作業を再開できるよう、FORMの送り先に完全URLを指定
-my $url = 'https://difff.jp/' ;
-# 保存したHTMLファイルから作業を再開できなくてもよい場合は相対パスを指定
-# my $url = './' ;
-```
+## 背景
 
-↑ CGIの設置先を完全URLで記載してください（index.cgi は記入不要）。
-FORMタグの `action=` にこの値が入り、保存したHTMLファイルからでも
-文書をPOSTできるようになります。その必要がない場合は上記のかわりに、
+作者管理サイト（https://difff.jp/）は無償利用できますが、機密文書を社内サーバで比較したい要望向けにソースが公開されています。  
+比較処理は `diff` を使い、比較対象は一時ファイルではなくFIFO（名前付きパイプ）経由で受け渡します。
 
-```perl
-# 保存したHTMLファイルから作業を再開できるよう、FORMの送り先に完全URLを指定
-# my $url = 'https://difff.jp/' ;
-# 保存したHTMLファイルから作業を再開できなくてもよい場合は相対パスを指定
-my $url = './' ;
-```
+## 更新履歴
 
-のように設定してください。
+### 2017-08-07
 
-```perl
-my $diffcmd = '/usr/bin/diff' ;  # diffコマンドのパスを指定する
-```
+- HTTPSによる暗号化通信に対応
 
-↑ diffコマンドのパスを調べて記載してください。
+### 2015-06-17
 
-```perl
-my $fifodir = '/tmp' ;           # FIFOを作成するディレクトリを指定する
-```
+- 結果公開機能を追加
 
-↑ FIFOを作成可能な、apacheからの書き込み権限のあるディレクトリを指定。
+### 2013-03-21
 
-以上で difff《ﾃﾞｭﾌﾌ》をウェブブラウザから利用できるようになります。
+- 文字数カウンタ改良（空白・改行除外の文字数表示）
+- 単語数カウント追加
 
-動かない場合、コマンドラインから下記を実行すると動作確認ができます。
+### 2013-03-12
 
-```bash
-% export QUERY_STRING="sequenceA=hogehoge&sequenceB=hagehage"
-% ./index.cgi
-```
+- 入力フォーム直下に比較結果表示する構成に変更
+- 入力文書と比較結果を1つのHTMLとして保存・再開可能に
+- 文字数カウント機能追加
+- 配色を改良（カラー2/モノクロ切替）
+- 日本語処理を Perl5.8/UTF-8 に変更
 
-出力の1行目が `Content-type: text/html; charset=utf-8`
-となっており、2行目が空白行、3行目以降にHTMLが出力されれば成功です。
-3行目以降のHTMLをファイルに書き出し、ブラウザで開いて内容を確認してください。
+### 2013-01-11
 
-エラーが出る場合は、エラーメッセージを参照し対処してください。
+- 英語版を公開
 
-また difff《ﾃﾞｭﾌﾌ》は比較の結果をサーバに保存し、公開用のURLを発行
-することができます。結果の保存場所である data/ ディレクトリには、
-apacheから読み書き・実行できる権限を与えてください。なお、公開版の
-https://difff.jp/ では、保存期間を過ぎると結果が削除されます。
-（結果を公開する機能が必要ない場合は6.0を利用してください）
+### 2012-10-22
 
+- difff ver.5 のソースをGitHub公開
 
-更新履歴
---------
-
-### 2017-08-07 ###
-
-+ HTTPSによる暗号化通信に対応。
-
-### 2015-06-17 ###
-
-+ ﾃﾞｭﾌﾌの結果を公開する機能を追加。
-
-### 2013-03-21 ###
-
-+ 文字数カウンタを改良し、空白文字・改行を除いた文字数も表示。
-+ 単語数もカウントするよう改良。
-
-### 2013-03-12 ###
-
-+ トップページの入力フォームのすぐ下に結果が表示されるように変更。  
-  入力した文書と比較結果とをまとめて1つのHTMLファイルに保存できます。  
-  また保存したHTMLを開いて作業を再開することも可能です。
-+ 文字数をカウントする機能を追加。
-+ ハイライトの色を、見やすいけれど疲れない色に変更。  
-  ver.5と同じ緑色や、印刷に便利な白黒に切り替えることもできます。
-+ 日本語の処理をPerl5.6/EUC-JPからPerl5.8/UTF-8に変更。
-
-### 2013-01-11 ###
-
-+ 英語版を公開。
-
-### 2012-10-22 ###
-
-+ difff《ﾃﾞｭﾌﾌ》ver.5のソースをGitHubで公開。
-
-
-License
---------
+## License
 
 Copyright &copy; 2004-2025 Yuki Naito
- ([@meso_cacase](https://twitter.com/meso_cacase))  
-This software is distributed under
-[modified BSD license](https://www.opensource.org/licenses/bsd-license.php).
+([@meso_cacase](https://twitter.com/meso_cacase))  
+This software is distributed under [modified BSD license](https://www.opensource.org/licenses/bsd-license.php).

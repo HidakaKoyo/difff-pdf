@@ -12,17 +12,26 @@ use strict ;
 use utf8 ;
 use POSIX ;
 use Digest::MD5 qw(md5_hex) ;
+use File::Copy qw(copy) ;
 
-my $url = './' ;
+my $url = resolve_base_url() ;
 
 my $diffcmd = '/usr/bin/diff' ;  # diffコマンドのパスを指定
 my $fifodir = '/tmp' ;           # FIFOを作成するディレクトリを指定
+my $datadir = 'data' ;
+my $tmpdir  = "$datadir/tmp" ;
+my $retention_days = get_env_int('DIFFF_RETENTION_DAYS', 3) ;
+my $data_url = build_data_url($url) ;
 
 binmode STDOUT, ':utf8' ;        # 標準出力をUTF-8エンコード
 binmode STDERR, ':utf8' ;        # 標準エラー出力をUTF-8エンコード
 
 # ▼ HTTPリクエストからクエリを取得し整形してFIFOに送る
 my %query = get_query_parameters() ;
+cleanup_expired_public_assets() ;
+
+my $mode = $query{'mode'} // '' ;
+my $pdf_token = $query{'pdf_token'} // '' ;
 
 my $sequenceA = $query{'sequenceA'} // '' ;
 utf8::decode($sequenceA) ;  # utf8フラグを有効にする
@@ -136,10 +145,15 @@ $table .= <<"--EOS--" ;
 --EOS--
 #- △ 文字数をカウントしてtableに付加
 
+my $pdf_assets_block = '' ;
+($mode eq 'pdf' and $pdf_token ne '') and $pdf_assets_block = '__PDF_ASSETS_BLOCK__' ;
+
 my $message = <<"--EOS--" ;
 <div id=result>
 <table cellspacing=0>
 $table</table>
+
+$pdf_assets_block
 
 <p>
 	<input type=button id=hide value='結果のみ表示 (印刷用)' onclick='hideForm()'> |
@@ -292,7 +306,7 @@ $save = 0 ;
 #- ▲ エラーページ：引数が ERROR で始まる場合
 
 #- ▼ トップページ：引数がない場合
-(not $message) and redirect_page($url) ;
+(not $message) and redirect_page("${url}difff.pl") ;
 #- ▲ トップページ：引数がない場合
 
 #- ▼ HTML出力
@@ -387,7 +401,7 @@ my $html = <<"--EOS--" ;
 
 <div id=top style='border-top:5px solid #00BBFF; padding-top:10px'>
 <font size=5>
-	<a class=k href='$url'>
+	<a class=k href='${url}difff.pl'>
 	テキスト比較ツール difff《ﾃﾞｭﾌﾌ》</a></font><!--
 --><font size=3>ver.6.1</font>
 &emsp;
@@ -405,7 +419,7 @@ my $html = <<"--EOS--" ;
 <div id=form>
 <p>下の枠に比較したい文章を入れてくだちい。差分 (diff) を表示します。</p>
 
-<form method=POST id=difff name=difff action='$url'>
+<form method=POST id=difff name=difff action='${url}difff.pl'>
 <table cellspacing=0>
 <tr>
 	<td class=n><textarea name=sequenceA rows=20>$sequenceA</textarea></td>
@@ -450,6 +464,16 @@ my $filename =
 	$char[rand(@char)] .
 	$char[rand(@char)] .
 	'.html' ;
+my $slug = $filename ;
+$slug =~ s/\.html$// ;
+my $prefix = "${md5}_${slug}" ;
+
+if ($mode eq 'pdf' and $pdf_token ne ''){
+	my $pdf_links = persist_pdf_assets($pdf_token, $prefix) ;
+	$html =~ s/__PDF_ASSETS_BLOCK__/$pdf_links/s ;
+} else {
+	$html =~ s/__PDF_ASSETS_BLOCK__//g ;
+}
 
 # 同名のファイルが既に存在する場合はエラーを返す
 (-e "data/$filename") and print_html('ERROR : cannot save file (1)') ;
@@ -467,6 +491,101 @@ symlink "${md5}_${filename}", "data/$filename"
 	or print_html('ERROR : cannot save file (3)') ;
 
 return $filename ;
+} ;
+# ====================
+sub persist_pdf_assets {
+	my ($token, $prefix) = @_ ;
+	my $srcdir = "$tmpdir/$token" ;
+	(-d $srcdir) or return "<p><font color=red>PDF成果物を保存できませんでした（元データが見つかりません）。</font></p>" ;
+
+	my %files = (
+		srcA       => ['sourceA.pdf',       "${prefix}.srcA.pdf"],
+		srcB       => ['sourceB.pdf',       "${prefix}.srcB.pdf"],
+		annA       => ['annotatedA.pdf',    "${prefix}.annA.pdf"],
+		annB       => ['annotatedB.pdf',    "${prefix}.annB.pdf"],
+		annComment => ['annotatedComment.pdf', "${prefix}.annComment.pdf"],
+	) ;
+
+	my @links ;
+	foreach my $label (qw(srcA srcB annA annB annComment)){
+		my ($src_name, $dst_name) = @{$files{$label}} ;
+		my $src_path = "$srcdir/$src_name" ;
+		my $dst_path = "$datadir/$dst_name" ;
+		if (-f $src_path and copy($src_path, $dst_path)){
+			push @links, "<a href='${data_url}$dst_name'>$label.pdf</a>" ;
+		}
+	}
+
+	if (not @links){
+		return "<p><font color=red>PDF成果物を保存できませんでした（コピー失敗）。</font></p>" ;
+	}
+	return "<p><b>PDF成果物:</b><br>" . join(' / ', @links) . "</p>" ;
+} ;
+# ====================
+sub cleanup_expired_public_assets {
+	my $ttl = $retention_days * 86400 ;
+	$ttl > 0 or return ;
+	my $now = time ;
+	opendir my $dh, $datadir or return ;
+	while (my $name = readdir $dh){
+		next unless $name =~ /^([a-f0-9]{32})_([a-zmnp-z2-9]{5})\.html$/ ;
+		my ($md5, $slug) = ($1, $2) ;
+		my $path = "$datadir/$name" ;
+		my $mtime = (stat($path))[9] // $now ;
+		next if ($now - $mtime) < $ttl ;
+		unlink $path ;
+		unlink "$datadir/$slug.html" if -l "$datadir/$slug.html" ;
+		foreach my $suffix (qw(srcA srcB annA annB annComment)){
+			my $pdf = "$datadir/${md5}_${slug}.${suffix}.pdf" ;
+			(-f $pdf) and unlink $pdf ;
+		}
+	}
+	closedir $dh ;
+} ;
+# ====================
+sub get_env_int {
+	my ($name, $default) = @_ ;
+	defined $ENV{$name} or return $default ;
+	$ENV{$name} =~ /^(\d+)$/ or return $default ;
+	return $1 ;
+} ;
+# ====================
+sub resolve_base_url {
+	if (defined $ENV{'DIFFF_BASE_URL'} and $ENV{'DIFFF_BASE_URL'} ne ''){
+		my $base = $ENV{'DIFFF_BASE_URL'} ;
+		$base .= '/' unless $base =~ m{/$} ;
+		return $base ;
+	}
+	if (defined $ENV{'HTTP_HOST'} and $ENV{'HTTP_HOST'} ne ''){
+		my $scheme = 'http' ;
+		if (defined $ENV{'REQUEST_SCHEME'} and lc($ENV{'REQUEST_SCHEME'}) eq 'https'){
+			$scheme = 'https' ;
+		} elsif (defined $ENV{'HTTPS'} and $ENV{'HTTPS'} =~ /^(1|on)$/i){
+			$scheme = 'https' ;
+		} elsif (defined $ENV{'SERVER_PORT'} and $ENV{'SERVER_PORT'} =~ /^443$/){
+			$scheme = 'https' ;
+		}
+		my $script = $ENV{'SCRIPT_NAME'} // '/' ;
+		$script =~ s/\?.*$// ;
+		$script =~ s{[^/]*$}{} ;
+		$script eq '' and $script = '/' ;
+		return "${scheme}://$ENV{'HTTP_HOST'}$script" ;
+	}
+	if (defined $ENV{'SCRIPT_NAME'} and $ENV{'SCRIPT_NAME'} ne ''){
+		my $script = $ENV{'SCRIPT_NAME'} ;
+		$script =~ s/\?.*$// ;
+		$script =~ s{[^/]*$}{} ;
+		$script eq '' and $script = '/' ;
+		return $script ;
+	}
+	return './' ;
+} ;
+# ====================
+sub build_data_url {
+	my $base = $_[0] // './' ;
+	$base =~ s{(cgi-bin|htbin)/$}{} ;
+	$base =~ m{/$} and return "${base}data/" ;
+	return "${base}/data/" ;
 } ;
 # ====================
 sub redirect_page {  # リダイレクトする

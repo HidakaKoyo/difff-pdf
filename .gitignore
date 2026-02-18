@@ -1,0 +1,5 @@
+.DS_Store
+cgi-bin/
+tools/.venv/
+tools/__pycache__/
+tools/.DS_Store
