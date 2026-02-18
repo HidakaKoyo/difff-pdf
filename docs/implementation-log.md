@@ -24,3 +24,36 @@ Wed Feb 18 18:50:18 2026 PDF annotate summary token=rp9d5tkj2gkk skipped_duplica
 WARN map_a token size mismatch map=6433 seq=6432 token=br92vz4t26jx
 WARN map_b token size mismatch map=5960 seq=5959 token=br92vz4t26jx
 Wed Feb 18 18:53:00 2026 PDF annotate summary token=br92vz4t26jx skipped_duplicates=1001 map_a_miss=132 map_b_miss=84
+- 2026-02-18: annComment描画を右余白180pt集約へ変更（本文は挿入マーク+短線のみ）。フォント自動縮小(9pt→最小6pt)とoverflow時continuationページ追加、summaryにcomment_*指標を追加。
+WARN map_a token size mismatch map=6433 seq=6432 token=5khrn4vg7j9c
+WARN map_b token size mismatch map=5960 seq=5959 token=5khrn4vg7j9c
+Wed Feb 18 19:31:23 2026 PDF annotate summary token=5khrn4vg7j9c skipped_duplicates=1001 map_a_miss=132 map_b_miss=84 comment_pages_extended=6 comment_min_font_used=9.0 comment_continuation_pages=0
+WARN map_a token size mismatch map=5186 seq=5185 token=kwxd55hvkvbx
+WARN map_b token size mismatch map=5024 seq=5023 token=kwxd55hvkvbx
+Wed Feb 18 19:31:44 2026 PDF annotate summary token=kwxd55hvkvbx skipped_duplicates=859 map_a_miss=102 map_b_miss=75 comment_pages_extended=5 comment_min_font_used=9.0 comment_continuation_pages=0
+- 2026-02-18: annComment本文マーカーを矢印から番号マークへ変更し、右余白コメントにも同じ番号ラベルを付与。
+WARN map_a token size mismatch map=5186 seq=5185 token=vtxprcgp3r9j
+WARN map_b token size mismatch map=4750 seq=4749 token=vtxprcgp3r9j
+Wed Feb 18 19:35:54 2026 PDF annotate summary token=vtxprcgp3r9j skipped_duplicates=709 map_a_miss=103 map_b_miss=65 comment_pages_extended=5 comment_min_font_used=9.0 comment_continuation_pages=0
+- 2026-02-18: annCommentコメント文字を通常ウェイトへ変更（重ね描画を廃止）し、開始フォントサイズを7ptへ調整。折返し計算も通常フォント基準へ統一。
+WARN map_a token size mismatch map=5186 seq=5185 token=t3nf6zwf3dfz
+WARN map_b token size mismatch map=4750 seq=4749 token=t3nf6zwf3dfz
+Wed Feb 18 19:37:49 2026 PDF annotate summary token=t3nf6zwf3dfz skipped_duplicates=709 map_a_miss=103 map_b_miss=65 comment_pages_extended=5 comment_min_font_used=7.0 comment_continuation_pages=0
+WARN map_a token size mismatch map=5186 seq=5185 token=wvm6z2qjfe9q
+WARN map_b token size mismatch map=4750 seq=4749 token=wvm6z2qjfe9q
+Wed Feb 18 19:39:00 2026 PDF annotate summary token=wvm6z2qjfe9q skipped_duplicates=709 map_a_miss=103 map_b_miss=65 comment_pages_extended=5 comment_min_font_used=7.0 comment_continuation_pages=0
+- 2026-02-18: annCommentのbboxはみ出し対策として、番号プレフィックス込みで折返し計算し、フォントメトリクスベースの行高へ変更。描画時にコメント枠内クリップを追加し、番号バッジを可変半径化。
+WARN map_a token size mismatch map=5186 seq=5185 token=4eyx5zrz6ejf
+WARN map_b token size mismatch map=6433 seq=6432 token=4eyx5zrz6ejf
+Wed Feb 18 19:42:56 2026 PDF annotate summary token=4eyx5zrz6ejf skipped_duplicates=4475 map_a_miss=36 map_b_miss=72 comment_pages_extended=5 comment_min_font_used=6.0 comment_continuation_pages=3
+WARN map_a token size mismatch map=5186 seq=5185 token=sckdei8ude6k
+WARN map_b token size mismatch map=4750 seq=4749 token=sckdei8ude6k
+Wed Feb 18 19:43:17 2026 PDF annotate summary token=sckdei8ude6k skipped_duplicates=709 map_a_miss=103 map_b_miss=65 comment_pages_extended=5 comment_min_font_used=7.0 comment_continuation_pages=0
+- 2026-02-18: annCommentで同一行かつ近接する複数差分コメントを統合する処理を追加（1文字程度の隙間は同一グループ化）。統合コメントは ` / ` 区切りで表示。
+WARN map_a token size mismatch map=5186 seq=5185 token=ngermprhqvmp
+WARN map_b token size mismatch map=4750 seq=4749 token=ngermprhqvmp
+Wed Feb 18 19:48:06 2026 PDF annotate summary token=ngermprhqvmp skipped_duplicates=709 map_a_miss=103 map_b_miss=65 comment_pages_extended=5 comment_min_font_used=7.0 comment_continuation_pages=0 comment_merged_groups=15
+- 2026-02-18: annCommentの近接差分統合で、コメント文面を ` / ` 連結から「B側トークン連続範囲の再構成」へ変更。差分間の未変更トークン（例: 1文字空き）もコメントへ取り込み、自然な連結文字列で表示するよう修正。
+WARN map_a token size mismatch map=5186 seq=5185 token=saiy5xq7yvrj
+WARN map_b token size mismatch map=4750 seq=4749 token=saiy5xq7yvrj
+Wed Feb 18 19:54:53 2026 PDF annotate summary token=saiy5xq7yvrj skipped_duplicates=709 map_a_miss=103 map_b_miss=65 comment_pages_extended=5 comment_min_font_used=7.0 comment_continuation_pages=0 comment_merged_groups=15

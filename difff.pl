@@ -348,16 +348,20 @@ sub process_pdf_request {
 
 	my $summary = {} ;
 	(-f $annotate_summary) and $summary = load_json_file($annotate_summary) ;
-	append_impl_log(
-		sprintf(
-			"%s PDF annotate summary token=%s skipped_duplicates=%d map_a_miss=%d map_b_miss=%d",
-			scalar localtime(),
-			$token,
-			$summary->{'skipped_duplicates'} // 0,
-			$summary->{'map_a_missing'} // 0,
-			$summary->{'map_b_missing'} // 0,
-		)
-	) ;
+		append_impl_log(
+			sprintf(
+				"%s PDF annotate summary token=%s skipped_duplicates=%d map_a_miss=%d map_b_miss=%d comment_pages_extended=%d comment_min_font_used=%.1f comment_continuation_pages=%d comment_merged_groups=%d",
+				scalar localtime(),
+				$token,
+				$summary->{'skipped_duplicates'} // 0,
+				$summary->{'map_a_missing'} // 0,
+				$summary->{'map_b_missing'} // 0,
+				$summary->{'comment_pages_extended'} // 0,
+				$summary->{'comment_min_font_used'} // 0,
+				$summary->{'comment_continuation_pages'} // 0,
+				$summary->{'comment_merged_groups'} // 0,
+			)
+		) ;
 
 	my $table = $ctx->{'table'} ;
 	my ($count1_A, $count2_A, $count3_A, $wcount_A) = count_char($sequence_a) ;

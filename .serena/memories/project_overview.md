@@ -1,0 +1,5 @@
+- プロジェクト名: difff-pdf
+- 目的: 既存のテキスト差分ツール difff を基盤に、PDF比較（XHTML再構成・注釈PDF生成・保存/削除導線）を提供する。
+- 主な技術: Perl CGI (`difff.pl`, `save.cgi`, `delete.cgi`) + Python補助スクリプト (`tools/pdf_annotate_diff.py`)。
+- ディレクトリ概要: ルートにCGI本体、`tools/` にPython補助、`docs/` に実装ログ、`data/` に保存データ、`en/` は英語版（今回非対象）。
+- 実行形態: `python -m http.server --cgi` でローカル起動し、`/difff.pl` をブラウザで利用。

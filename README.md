@@ -72,7 +72,7 @@ export DIFFF_BASE_URL='http://localhost:8000/cgi-bin/'
 
 - `annA.pdf`（A側の削除注釈）
 - `annB.pdf`（B側の追加注釈）
-- `annComment.pdf`（Aベース: 削除取り消し線 + 追加コメント注釈）
+- `annComment.pdf`（Aベース: 削除取り消し線 + 追加コメント注釈。右余白にコメント集約）
 
 ### 3. CLIスモークテスト（テキスト）
 
@@ -102,6 +102,13 @@ uv run --project tools python -m py_compile tools/pdf_annotate_diff.py
   - `annotatedA.pdf`
   - `annotatedB.pdf`
   - `annotatedComment.pdf`
+- `annotatedComment.pdf` の描画仕様:
+  - ページ幅は元PDF + 180pt（右余白追加）
+  - 本文には追加箇所の番号マーク + 短いリーダー線のみ描画（本文上の大きなコメント箱は描画しない）
+  - コメント本文は右余白に全文表示
+  - 同一行で近接する複数コメントは1つに統合し、差分間の未変更トークンも含めて自然な連結文字列として表示
+  - フォントは 7pt から自動縮小し、最小 6pt までで収める
+  - 6pt でも収まらない場合は continuation ページを追加
 - 失敗時方針:
   - bbox対応不能はベストエフォート（差分HTMLは返す）
   - 実行失敗はエラーメッセージを返す

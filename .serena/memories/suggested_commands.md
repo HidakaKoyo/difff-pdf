@@ -1,0 +1,5 @@
+- 依存同期: `uv sync --project tools --offline --no-python-downloads || uv sync --project tools`
+- CGI起動: `uv run --project tools python -m http.server --cgi 8000`
+- 構文チェック(Perl): `perl -c difff.pl` `perl -c save.cgi` `perl -c delete.cgi`
+- 構文チェック(Python): `uv run --project tools python -m py_compile tools/pdf_annotate_diff.py`
+- 主要アクセスURL: `http://localhost:8000/difff.pl`
