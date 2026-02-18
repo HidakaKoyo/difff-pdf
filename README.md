@@ -98,13 +98,20 @@ uv run --project tools python -m py_compile tools/pdf_annotate_diff.py
 - 差分計算:
   - `pdftotext -bbox-layout` の **XHTML** を起点に再構成テキストを作成
   - 既存 `split_text` に通して比較（テキストモードと同じ分割規則）
+  - 赤線（削除側）はトークン単位に分割したbboxで描画し、1文字差分が単語全体の赤線にならないようにする
+  - 赤線（削除側）は前後 `DIFFF_DIFF_BRIDGE_CHARS` 文字拡張で連結判定し、同一行で接続した場合のみ1範囲に統合
+  - 拡張は判定専用で、連結しない場合は元の差分範囲を維持
 - 注釈成果物:
   - `annotatedA.pdf`
   - `annotatedB.pdf`
   - `annotatedComment.pdf`
 - `annotatedComment.pdf` の描画仕様:
   - ページ幅は元PDF + 180pt（右余白追加）
-  - 本文には追加箇所の番号マーク + 短いリーダー線のみ描画（本文上の大きなコメント箱は描画しない）
+  - 本文には追加箇所の上側に番号マークを配置し、下向きポインタで変更点を示す（横方向へ伸ばさない）
+  - 番号はコメント単位で採番（同一行に複数コメントがある場合も別番号）
+  - コメントの統合単位は削除赤線の統合結果（bridged deleted ranges）に追従
+  - コメントは「赤線グループ（置換）」と「B側の純追加」の双方を対象に生成し、削除のみ・空白のみ変更はコメント非表示
+  - コメント本文には必要に応じて赤線内の非差分文字を補完して、赤線と内容の対応を保つ
   - コメント本文は右余白に全文表示
   - 同一行で近接する複数コメントは1つに統合し、差分間の未変更トークンも含めて自然な連結文字列として表示
   - フォントは 7pt から自動縮小し、最小 6pt までで収める
@@ -123,6 +130,7 @@ uv run --project tools python -m py_compile tools/pdf_annotate_diff.py
 | `DIFFF_PDFTOTEXT_TIMEOUT_SEC` | `60` | `pdftotext` 実行タイムアウト秒 |
 | `DIFFF_UV_CMD` | `/opt/homebrew/bin/uv` | `uv` 実行パス |
 | `DIFFF_UV_TIMEOUT_SEC` | `60` | `uv run` 実行タイムアウト秒 |
+| `DIFFF_DIFF_BRIDGE_CHARS` | `2` | 赤線（削除側）の近接差分を連結判定する前後拡張文字数（`0` で無効） |
 | `DIFFF_BASE_URL` | （自動判定） | CGIフォーム送信先のベースURL（末尾 `/` 推奨） |
 | `DIFFF_RETENTION_DAYS` | `3` | 公開結果の保持日数 |
 | `DIFFF_TMP_TTL_MINUTES` | `120` | `data/tmp` 一時成果物の保持分 |

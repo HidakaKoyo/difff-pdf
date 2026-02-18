@@ -33,6 +33,7 @@ my $retention_days            = get_env_int('DIFFF_RETENTION_DAYS', 3) ;
 my $tmp_ttl_minutes           = get_env_int('DIFFF_TMP_TTL_MINUTES', 120) ;
 my $pdftotext_timeout_sec     = get_env_int('DIFFF_PDFTOTEXT_TIMEOUT_SEC', 60) ;
 my $uv_timeout_sec            = get_env_int('DIFFF_UV_TIMEOUT_SEC', 60) ;
+my $diff_bridge_chars         = get_env_int('DIFFF_DIFF_BRIDGE_CHARS', 2) ;
 my $pdftotext_cmd             = $ENV{'DIFFF_PDFTOTEXT_CMD'} // '/opt/homebrew/bin/pdftotext' ;
 my $uv_cmd                    = $ENV{'DIFFF_UV_CMD'} // '/opt/homebrew/bin/uv' ;
 my $data_url                  = build_data_url($url) ;
@@ -320,6 +321,7 @@ sub process_pdf_request {
 		map_b          => $map_b,
 		deleted_ranges => $deleted_ranges,
 		added_ranges   => $added_ranges,
+		deleted_bridge_chars => $diff_bridge_chars,
 		ops            => $ops,
 	} ;
 	my $annotate_input_json = "$workdir/annotate_input.json" ;
@@ -348,11 +350,11 @@ sub process_pdf_request {
 
 	my $summary = {} ;
 	(-f $annotate_summary) and $summary = load_json_file($annotate_summary) ;
-		append_impl_log(
-			sprintf(
-				"%s PDF annotate summary token=%s skipped_duplicates=%d map_a_miss=%d map_b_miss=%d comment_pages_extended=%d comment_min_font_used=%.1f comment_continuation_pages=%d comment_merged_groups=%d",
-				scalar localtime(),
-				$token,
+	append_impl_log(
+		sprintf(
+			"%s PDF annotate summary token=%s skipped_duplicates=%d map_a_miss=%d map_b_miss=%d comment_pages_extended=%d comment_min_font_used=%.1f comment_continuation_pages=%d comment_merged_groups=%d deleted_ranges_input=%d deleted_ranges_output=%d deleted_bridge_merges=%d",
+			scalar localtime(),
+			$token,
 				$summary->{'skipped_duplicates'} // 0,
 				$summary->{'map_a_missing'} // 0,
 				$summary->{'map_b_missing'} // 0,
@@ -360,8 +362,11 @@ sub process_pdf_request {
 				$summary->{'comment_min_font_used'} // 0,
 				$summary->{'comment_continuation_pages'} // 0,
 				$summary->{'comment_merged_groups'} // 0,
+				$summary->{'deleted_ranges_input'} // 0,
+				$summary->{'deleted_ranges_output'} // 0,
+				$summary->{'deleted_bridge_merges'} // 0,
 			)
-		) ;
+	) ;
 
 	my $table = $ctx->{'table'} ;
 	my ($count1_A, $count2_A, $count3_A, $wcount_A) = count_char($sequence_a) ;
@@ -574,6 +579,35 @@ sub parse_diff_ranges {
 	return (\@deleted, \@added, \@ops) ;
 } ;
 # ====================
+sub split_bbox_by_token_count {
+	my ($bbox, $count) = @_ ;
+	my @boxes ;
+	($count and $count > 0) or return @boxes ;
+	(ref $bbox eq 'HASH') or return @boxes ;
+	(defined $bbox->{'x_min'} and defined $bbox->{'x_max'} and
+	 defined $bbox->{'y_min'} and defined $bbox->{'y_max'}) or return @boxes ;
+
+	my $x_min = 0 + $bbox->{'x_min'} ;
+	my $x_max = 0 + $bbox->{'x_max'} ;
+	my $y_min = 0 + $bbox->{'y_min'} ;
+	my $y_max = 0 + $bbox->{'y_max'} ;
+	my $width = $x_max - $x_min ;
+	$width > 0 or return @boxes ;
+
+	my $step = $width / $count ;
+	foreach my $i (0..$count-1){
+		my $left = $x_min + ($step * $i) ;
+		my $right = ($i == $count - 1) ? $x_max : ($x_min + ($step * ($i + 1))) ;
+		push @boxes, {
+			x_min => $left,
+			y_min => $y_min,
+			x_max => $right,
+			y_max => $y_max,
+		} ;
+	}
+	return @boxes ;
+} ;
+# ====================
 sub build_token_bbox_map_from_words {
 	my $words = $_[0] // [] ;
 	my @map ;
@@ -581,12 +615,17 @@ sub build_token_bbox_map_from_words {
 	foreach my $i (0..$size-1){
 		my $word = $words->[$i] ;
 		my @tokens = split_text( escape_char($word->{'text'} // '') ) ;
-		foreach my $token (@tokens){
+		my @token_boxes = split_bbox_by_token_count($word->{'bbox'}, scalar @tokens) ;
+		foreach my $ti (0..$#tokens){
+			my $token = $tokens[$ti] ;
+			my $token_bbox = ($ti <= $#token_boxes) ? $token_boxes[$ti] : $word->{'bbox'} ;
 			push @map, {
 				page     => $word->{'page'},
 				line_seq => $word->{'line_seq'},
 				word_seq => $word->{'word_seq'},
+				token_index => scalar(@map),
 				bbox     => $word->{'bbox'},
+				token_bbox => $token_bbox,
 				token    => $token,
 			} ;
 		}

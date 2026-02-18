@@ -144,7 +144,13 @@ def dedupe_draw_entries(entries: list[dict[str, Any]], kind: str, stats: dict[st
     for e in entries:
         page = int(e.get("page") or 0)
         word_seq = e.get("word_seq")
-        if word_seq is None:
+        token_index = e.get("token_index")
+        if kind == "deleted" and token_index is not None:
+            try:
+                key = f"{kind}:tok:{int(token_index)}"
+            except (TypeError, ValueError):
+                key = f"{kind}:tok:{token_index}"
+        elif word_seq is None:
             key = f"{kind}:{quantize_bbox_key(page, e.get('bbox'))}"
         else:
             key = f"{kind}:{page}:{word_seq}"
@@ -168,11 +174,88 @@ def range_to_indices(ranges: list[list[int]]) -> list[int]:
     return out
 
 
+def normalize_ranges(ranges: list[Any]) -> list[list[int]]:
+    normalized: list[list[int]] = []
+    for pair in ranges:
+        if not isinstance(pair, list) or len(pair) != 2:
+            continue
+        try:
+            start = int(pair[0])
+            end = int(pair[1])
+        except (TypeError, ValueError):
+            continue
+        if end < start:
+            continue
+        normalized.append([start, end])
+    normalized.sort(key=lambda r: (r[0], r[1]))
+    return normalized
+
+
+def range_line_key(range_pair: list[int], token_map: list[Any]) -> tuple[int, int] | None:
+    start, end = int(range_pair[0]), int(range_pair[1])
+    line_keys: set[tuple[int, int]] = set()
+    for idx in range(start, end + 1):
+        if idx < 0 or idx >= len(token_map):
+            continue
+        item = token_map[idx]
+        if not item or not item.get("bbox"):
+            continue
+        page = item.get("page")
+        line_seq = item.get("line_seq")
+        if page is None or line_seq is None:
+            continue
+        line_keys.add((int(page), int(line_seq)))
+        if len(line_keys) > 1:
+            return None
+    if len(line_keys) != 1:
+        return None
+    return next(iter(line_keys))
+
+
+def bridge_deleted_ranges(
+    deleted_ranges: list[Any],
+    map_a: list[Any],
+    bridge_chars: int,
+) -> tuple[list[list[int]], int]:
+    normalized = normalize_ranges(deleted_ranges)
+    if bridge_chars <= 0 or len(normalized) <= 1:
+        return normalized, 0
+
+    bridged: list[list[int]] = []
+    merges = 0
+
+    current = [normalized[0][0], normalized[0][1]]
+    current_line_key = range_line_key(current, map_a)
+
+    for src in normalized[1:]:
+        nxt = [src[0], src[1]]
+        next_line_key = range_line_key(nxt, map_a)
+
+        can_merge = False
+        if current_line_key is not None and next_line_key is not None and current_line_key == next_line_key:
+            prev_expanded_end = current[1] + bridge_chars
+            next_expanded_start = nxt[0] - bridge_chars
+            can_merge = next_expanded_start <= (prev_expanded_end + 1)
+
+        if can_merge:
+            current[1] = max(current[1], nxt[1])
+            merges += 1
+            continue
+
+        bridged.append(current)
+        current = nxt
+        current_line_key = next_line_key
+
+    bridged.append(current)
+    return bridged, merges
+
+
 def map_entries_for_indices(
     token_map: list[Any],
     indices: list[int],
     stats: dict[str, int],
     missing_key: str,
+    prefer_token_bbox: bool = False,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for idx in indices:
@@ -180,10 +263,18 @@ def map_entries_for_indices(
             stats[missing_key] = stats.get(missing_key, 0) + 1
             continue
         item = token_map[idx]
-        if not item or not item.get("bbox"):
+        if not item:
             stats[missing_key] = stats.get(missing_key, 0) + 1
             continue
-        out.append(item)
+        bbox = item.get("bbox")
+        if prefer_token_bbox and item.get("token_bbox"):
+            bbox = item.get("token_bbox")
+        if not bbox:
+            stats[missing_key] = stats.get(missing_key, 0) + 1
+            continue
+        copied = dict(item)
+        copied["bbox"] = bbox
+        out.append(copied)
     return out
 
 
@@ -258,16 +349,16 @@ def get_font_metrics(font_name: str, font_size: float) -> tuple[float, float, fl
     return ascent, descent, glyph_h, line_step
 
 
-def collect_comment_text_from_map(map_b: list[Any], start_idx: int, end_idx: int) -> str:
+def collect_text_from_map(token_map: list[Any], start_idx: int, end_idx: int) -> str:
     if end_idx < start_idx:
         return ""
     lower = max(0, int(start_idx))
-    upper = min(int(end_idx), len(map_b) - 1)
+    upper = min(int(end_idx), len(token_map) - 1)
     if upper < lower:
         return ""
     tokens: list[str] = []
     for i in range(lower, upper + 1):
-        item = map_b[i]
+        item = token_map[i]
         if not item:
             continue
         tok = item.get("token")
@@ -280,8 +371,89 @@ def collect_comment_text_from_map(map_b: list[Any], start_idx: int, end_idx: int
     return "".join(tokens)
 
 
-def build_comment_annotations(ops: list[dict[str, Any]], map_a: list[Any], map_b: list[Any], stats: dict[str, int]) -> list[dict[str, Any]]:
+def collect_comment_text_from_map(map_b: list[Any], start_idx: int, end_idx: int) -> str:
+    return collect_text_from_map(map_b, start_idx, end_idx)
+
+
+def build_deleted_group_lookup(deleted_ranges: list[list[int]], map_size: int) -> list[int]:
+    lookup = [-1] * max(0, map_size)
+    for gid, pair in enumerate(normalize_ranges(deleted_ranges)):
+        start, end = int(pair[0]), int(pair[1])
+        if end < 0 or start >= map_size:
+            continue
+        lo = max(0, start)
+        hi = min(map_size - 1, end)
+        for idx in range(lo, hi + 1):
+            lookup[idx] = gid
+    return lookup
+
+
+def resolve_deleted_group_id(op: dict[str, Any], deleted_lookup: list[int]) -> int | None:
+    if not deleted_lookup:
+        return None
+    typ = op.get("type")
+    try:
+        a_start = int(op.get("a_start", -1))
+        a_end = int(op.get("a_end", -1))
+    except (TypeError, ValueError):
+        return None
+
+    candidate_indices: list[int] = []
+    if typ == "c":
+        if a_start >= 0 and a_end >= a_start:
+            candidate_indices.extend(range(a_start, a_end + 1))
+    elif typ == "a":
+        candidate_indices.extend([a_start, a_end, a_start - 1, a_end + 1])
+    else:
+        return None
+
+    groups: set[int] = set()
+    for idx in candidate_indices:
+        if idx < 0 or idx >= len(deleted_lookup):
+            continue
+        gid = deleted_lookup[idx]
+        if gid >= 0:
+            groups.add(gid)
+
+    if len(groups) == 1:
+        return next(iter(groups))
+    return None
+
+
+def build_comment_annotations(
+    ops: list[dict[str, Any]],
+    map_a: list[Any],
+    map_b: list[Any],
+    bridged_deleted_ranges: list[list[int]],
+    stats: dict[str, int],
+    allowed_deleted_group_ids: set[int] | None = None,
+) -> list[dict[str, Any]]:
     annotations: list[dict[str, Any]] = []
+    deleted_lookup = build_deleted_group_lookup(bridged_deleted_ranges, len(map_a))
+
+    def anchor_from_item(item: dict[str, Any]) -> dict[str, Any]:
+        anchor = dict(item)
+        token_bbox = item.get("token_bbox")
+        if token_bbox:
+            anchor["bbox"] = token_bbox
+        return anchor
+
+    def anchor_for_deleted_group(range_pair: list[int]) -> dict[str, Any] | None:
+        start = int(range_pair[0])
+        end = int(range_pair[1])
+        for idx in range(start, end + 1):
+            if idx < 0 or idx >= len(map_a):
+                continue
+            item = map_a[idx]
+            if item and item.get("bbox"):
+                return anchor_from_item(item)
+        for idx in (start - 1, end + 1):
+            if idx < 0 or idx >= len(map_a):
+                continue
+            item = map_a[idx]
+            if item and item.get("bbox"):
+                return anchor_from_item(item)
+        return None
 
     def nearest_anchor(op: dict[str, Any]) -> dict[str, Any] | None:
         candidates = [
@@ -298,8 +470,11 @@ def build_comment_annotations(ops: list[dict[str, Any]], map_a: list[Any], map_b
                 continue
             item = map_a[idx]
             if item and item.get("bbox"):
-                return item
+                return anchor_from_item(item)
         return None
+
+    grouped_b_ranges: dict[int, list[int]] = {}
+    insertion_annotations: list[dict[str, Any]] = []
 
     for op in ops:
         typ = op.get("type")
@@ -312,18 +487,68 @@ def build_comment_annotations(ops: list[dict[str, Any]], map_a: list[Any], map_b
         text = collect_comment_text_from_map(map_b, b_start, b_end).strip()
         if not text:
             continue
-        anchor = nearest_anchor(op)
+        deleted_group_id = resolve_deleted_group_id(op, deleted_lookup)
+        if deleted_group_id is None:
+            if typ != "a":
+                continue
+            anchor = nearest_anchor(op)
+            if not anchor:
+                stats["map_a_missing"] = stats.get("map_a_missing", 0) + 1
+                continue
+            insertion_annotations.append(
+                {
+                    "anchor": anchor,
+                    "text": text,
+                    "b_start": b_start,
+                    "b_end": b_end,
+                    "deleted_group_id": None,
+                }
+            )
+            continue
+
+        current = grouped_b_ranges.get(deleted_group_id)
+        if current is None:
+            grouped_b_ranges[deleted_group_id] = [b_start, b_end]
+        else:
+            current[0] = min(int(current[0]), b_start)
+            current[1] = max(int(current[1]), b_end)
+
+    for gid, range_pair in enumerate(normalize_ranges(bridged_deleted_ranges)):
+        if allowed_deleted_group_ids is not None and gid not in allowed_deleted_group_ids:
+            continue
+        b_span = grouped_b_ranges.get(gid)
+        if b_span is None:
+            continue
+
+        anchor = anchor_for_deleted_group(range_pair)
         if not anchor:
             stats["map_a_missing"] = stats.get("map_a_missing", 0) + 1
             continue
+
+        b_start = int(b_span[0])
+        b_end = int(b_span[1])
+        text = collect_comment_text_from_map(map_b, b_start, b_end).strip()
+        if not text:
+            # 空白のみの差分など、有意な置換テキストがない場合はコメントを出さない
+            continue
+
+        # 赤線グループ内の非差分文字も含めたいケースに備え、A側同範囲の可視文字を補完する。
+        # 既にB側テキストに同等文字が含まれる場合は重複させない。
+        a_text = collect_text_from_map(map_a, int(range_pair[0]), int(range_pair[1])).strip()
+        if a_text and a_text not in text:
+            text = a_text if len(a_text) > len(text) else text
+
         annotations.append(
             {
                 "anchor": anchor,
                 "text": text,
                 "b_start": b_start,
                 "b_end": b_end,
+                "deleted_group_id": gid,
             }
         )
+
+    annotations.extend(insertion_annotations)
 
     uniq: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -333,7 +558,8 @@ def build_comment_annotations(ops: list[dict[str, Any]], map_a: list[Any], map_b
         word_seq = anchor.get("word_seq")
         b_start = int(ann.get("b_start", -1))
         b_end = int(ann.get("b_end", -1))
-        key = f"comment:{page}:{word_seq}:{b_start}:{b_end}:{ann['text']}"
+        deleted_group_id = ann.get("deleted_group_id")
+        key = f"comment:{page}:{word_seq}:{b_start}:{b_end}:{deleted_group_id}:{ann['text']}"
         if key in seen:
             stats["skipped_duplicates"] = stats.get("skipped_duplicates", 0) + 1
             continue
@@ -360,6 +586,11 @@ def merge_nearby_comment_annotations(
         return (page, line_seq, word_seq, x_min)
 
     def can_merge(prev: dict[str, Any], nxt: dict[str, Any]) -> bool:
+        prev_gid = prev.get("deleted_group_id")
+        next_gid = nxt.get("deleted_group_id")
+        if prev_gid is not None or next_gid is not None:
+            return prev_gid is not None and prev_gid == next_gid
+
         a_prev = prev["anchor"]
         a_next = nxt["anchor"]
         if int(a_prev.get("page") or 0) != int(a_next.get("page") or 0):
@@ -379,8 +610,10 @@ def merge_nearby_comment_annotations(
             anchor["bbox"] = dict(anchor["bbox"])
         return {
             "anchor": anchor,
+            "text": src.get("text", ""),
             "b_start": int(src.get("b_start", -1)),
             "b_end": int(src.get("b_end", -1)),
+            "deleted_group_id": src.get("deleted_group_id"),
         }
 
     ordered = sorted(annotations, key=sort_key)
@@ -419,8 +652,16 @@ def merge_nearby_comment_annotations(
     for g in grouped:
         text = collect_comment_text_from_map(map_b, int(g.get("b_start", -1)), int(g.get("b_end", -1))).strip()
         if not text:
+            text = str(g.get("text", "")).strip()
+        if not text:
             continue
-        result.append({"anchor": g["anchor"], "text": text})
+        result.append(
+            {
+                "anchor": g["anchor"],
+                "text": text,
+                "deleted_group_id": g.get("deleted_group_id"),
+            }
+        )
     return result
 
 
@@ -490,11 +731,10 @@ def build_comment_queue(
     text_w: float,
     font_name: str,
     font_size: float,
-    marker_ids: dict[str, int],
 ) -> list[dict[str, Any]]:
     queue: list[dict[str, Any]] = []
     for ann in sort_comments_by_anchor(comments, page_h):
-        marker_id = marker_ids.get(marker_key_for_anchor(ann["anchor"]), 0)
+        marker_id = int(ann.get("marker_id", 0) or 0)
         label = f"[{marker_id}] " if marker_id > 0 else ""
         text_for_wrap = f"{label}{ann['text']}"
         lines = wrap_text_by_width(text_for_wrap, font_name, font_size, text_w)
@@ -613,7 +853,6 @@ def build_comment_layout_pages(
     page_h: float,
     margin_w: float,
     font_name: str,
-    marker_ids: dict[str, int],
 ) -> tuple[list[dict[str, Any]], float]:
     inner_w = margin_w - (2.0 * COMMENT_MARGIN_PAD_X)
     text_w = inner_w - (2.0 * COMMENT_BOX_PAD_X)
@@ -621,13 +860,13 @@ def build_comment_layout_pages(
     box_w = inner_w
 
     for size in iter_font_sizes(COMMENT_FONT_START, COMMENT_FONT_MIN, COMMENT_FONT_STEP):
-        queue = build_comment_queue(comments, page_h, text_w, font_name, size, marker_ids)
+        queue = build_comment_queue(comments, page_h, text_w, font_name, size)
         placements, remaining = place_comment_queue_on_page(queue, page_h, box_x, box_w, font_name, size, True)
         if not remaining:
             return ([{"placements": placements, "font_size": size, "continuation": False}], size)
 
     min_size = COMMENT_FONT_MIN
-    queue = build_comment_queue(comments, page_h, text_w, font_name, min_size, marker_ids)
+    queue = build_comment_queue(comments, page_h, text_w, font_name, min_size)
     layouts: list[dict[str, Any]] = []
 
     first_placements, queue = place_comment_queue_on_page(queue, page_h, box_x, box_w, font_name, min_size, True)
@@ -665,21 +904,29 @@ def draw_insertion_number_marker(
     marker_id: int,
     font_name: str,
 ) -> None:
-    _, y0, x1, y1 = bbox_to_pdf_coords(page_h, anchor["bbox"])
-    ay = (y0 + y1) / 2.0
-    start_x = min(base_w - 4.0, x1 + 1.0)
+    x0, _, x1, y1 = bbox_to_pdf_coords(page_h, anchor["bbox"])
+    pointer_x = max(1.2, min(base_w - 1.2, (x0 + x1) / 2.0))
     label = str(marker_id)
-    number_size = 5.1
+    number_size = 5.7
+    badge_r = 2.9
     tw = pdfmetrics.stringWidth(label, font_name, number_size)
-    badge_r = max(3.6, (tw / 2.0) + 1.3)
-    badge_cx = min(base_w + 11.0, start_x + badge_r + 1.6)
-    badge_cy = ay
+    badge_cx = max(badge_r + 0.8, min(base_w - badge_r - 0.8, pointer_x))
+    tip_y = min(page_h - 1.0, y1 - 0.35)
+    stem_base_y = min(page_h - 0.8, tip_y + 1.25)
+    badge_cy = min(page_h - badge_r - 0.8, stem_base_y + 0.70 + badge_r)
 
     c.setStrokeColor(Color(0.08, 0.24, 0.80, alpha=0.90))
-    c.setLineWidth(0.7)
-    c.line(start_x, ay, badge_cx - badge_r, ay)
+    c.setLineWidth(0.6)
 
     c.setFillColor(Color(0.08, 0.24, 0.80, alpha=0.90))
+    pointer_w = 1.8
+    tri = c.beginPath()
+    tri.moveTo(pointer_x, tip_y)
+    tri.lineTo(pointer_x - pointer_w, stem_base_y)
+    tri.lineTo(pointer_x + pointer_w, stem_base_y)
+    tri.close()
+    c.drawPath(tri, stroke=0, fill=1)
+
     c.circle(badge_cx, badge_cy, badge_r, stroke=1, fill=1)
 
     c.setFillColor(Color(1.0, 1.0, 1.0, alpha=1.0))
@@ -695,7 +942,6 @@ def build_comment_overlay_page(
     layout: dict[str, Any],
     regular_font: str,
     bold_font: str,
-    marker_ids: dict[str, int],
     draw_markers: bool,
     continuation_label: str | None,
 ) -> Any:
@@ -718,15 +964,11 @@ def build_comment_overlay_page(
         c.setFont(regular_font, 7)
         c.drawString(base_w + COMMENT_MARGIN_PAD_X, height - 12.0, continuation_label)
 
-    marker_seen: set[str] = set()
     for placement in layout.get("placements", []):
         anchor = placement["anchor"]
-        marker_key = marker_key_for_anchor(anchor)
-        marker_id = marker_ids.get(marker_key, 0)
-
-        if draw_markers and marker_key not in marker_seen:
-            marker_seen.add(marker_key)
-            marker_id > 0 and draw_insertion_number_marker(c, base_w, height, anchor, marker_id, regular_font)
+        marker_id = int(placement.get("marker_id", 0) or 0)
+        if draw_markers and marker_id > 0:
+            draw_insertion_number_marker(c, base_w, height, anchor, marker_id, regular_font)
 
         box_x = base_w + float(placement["box_x"])
         box_y = float(placement["box_y"])
@@ -784,22 +1026,18 @@ def merge_comment_overlay_with_margin(
         full_w = base_w + COMMENT_MARGIN_WIDTH
 
         page_plan = draw_plan.get(page_num, {"strike": [], "comment": []})
-        comments = page_plan.get("comment", [])
-        marker_ids: dict[str, int] = {}
-        next_marker_id = 1
-        for ann in sort_comments_by_anchor(comments, base_h):
-            key = marker_key_for_anchor(ann["anchor"])
-            if key in marker_ids:
-                continue
-            marker_ids[key] = next_marker_id
-            next_marker_id += 1
+        comments_src = page_plan.get("comment", [])
+        comments: list[dict[str, Any]] = []
+        for marker_id, ann in enumerate(sort_comments_by_anchor(comments_src, base_h), start=1):
+            numbered = dict(ann)
+            numbered["marker_id"] = marker_id
+            comments.append(numbered)
 
         layouts, page_min_font = build_comment_layout_pages(
             comments,
             base_h,
             COMMENT_MARGIN_WIDTH,
             regular_font,
-            marker_ids,
         )
 
         if min_font_used is None:
@@ -817,7 +1055,6 @@ def merge_comment_overlay_with_margin(
             layouts[0],
             regular_font,
             bold_font,
-            marker_ids,
             True,
             None,
         )
@@ -835,7 +1072,6 @@ def merge_comment_overlay_with_margin(
                 layout,
                 regular_font,
                 bold_font,
-                marker_ids,
                 False,
                 label,
             )
@@ -857,24 +1093,70 @@ def annotate(args: argparse.Namespace) -> dict[str, Any]:
     deleted_ranges = payload.get("deleted_ranges", [])
     added_ranges = payload.get("added_ranges", [])
     ops = payload.get("ops", [])
+    deleted_bridge_chars = payload.get("deleted_bridge_chars", 2)
+    try:
+        deleted_bridge_chars = int(deleted_bridge_chars)
+    except (TypeError, ValueError):
+        deleted_bridge_chars = 2
+    deleted_bridge_chars = max(0, deleted_bridge_chars)
 
     stats: dict[str, Any] = {
         "skipped_duplicates": 0,
         "map_a_missing": 0,
         "map_b_missing": 0,
         "comment_merged_groups": 0,
+        "deleted_ranges_input": 0,
+        "deleted_ranges_output": 0,
+        "deleted_bridge_merges": 0,
     }
 
-    deleted_indices = range_to_indices(deleted_ranges)
+    normalized_deleted_ranges = normalize_ranges(deleted_ranges)
+    bridged_deleted_ranges, deleted_bridge_merges = bridge_deleted_ranges(
+        normalized_deleted_ranges,
+        map_a,
+        deleted_bridge_chars,
+    )
+    stats["deleted_ranges_input"] = len(normalized_deleted_ranges)
+    stats["deleted_ranges_output"] = len(bridged_deleted_ranges)
+    stats["deleted_bridge_merges"] = deleted_bridge_merges
+
+    deleted_indices = range_to_indices(bridged_deleted_ranges)
     added_indices = range_to_indices(added_ranges)
 
-    deleted_entries = map_entries_for_indices(map_a, deleted_indices, stats, "map_a_missing")
+    deleted_entries = map_entries_for_indices(
+        map_a,
+        deleted_indices,
+        stats,
+        "map_a_missing",
+        prefer_token_bbox=True,
+    )
     added_entries = map_entries_for_indices(map_b, added_indices, stats, "map_b_missing")
 
     deleted_entries = dedupe_draw_entries(deleted_entries, "deleted", stats)
     added_entries = dedupe_draw_entries(added_entries, "added", stats)
 
-    comments = build_comment_annotations(ops, map_a, map_b, stats)
+    deleted_group_lookup = build_deleted_group_lookup(bridged_deleted_ranges, len(map_a))
+    drawable_deleted_group_ids: set[int] = set()
+    for e in deleted_entries:
+        token_index = e.get("token_index")
+        try:
+            idx = int(token_index)
+        except (TypeError, ValueError):
+            continue
+        if idx < 0 or idx >= len(deleted_group_lookup):
+            continue
+        gid = deleted_group_lookup[idx]
+        if gid >= 0:
+            drawable_deleted_group_ids.add(gid)
+
+    comments = build_comment_annotations(
+        ops,
+        map_a,
+        map_b,
+        bridged_deleted_ranges,
+        stats,
+        allowed_deleted_group_ids=drawable_deleted_group_ids,
+    )
 
     regular_font, bold_font = ensure_fonts()
 
