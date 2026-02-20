@@ -1,0 +1,53 @@
+{
+  "name": "difff-pdf-desktop",
+  "version": "0.1.1",
+  "private": true,
+  "description": "difff-pdf UI refresh + Electron shell",
+  "author": "Yuki Naito",
+  "license": "BSD-3-Clause",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "electron:dev": "sh -c 'SHA=$(git rev-parse --short HEAD 2>/dev/null || echo nogit); TIME=$(date -u +%Y%m%dT%H%M%SZ); DIFFF_BUILD_SHA=$SHA DIFFF_BUILD_TIME=$TIME electron .'",
+    "electron:dist": "sh -c 'SHA=$(git rev-parse --short HEAD 2>/dev/null || echo nogit); TIME=$(date -u +%Y%m%dT%H%M%SZ); electron-builder --mac dmg zip --publish never --config.extraMetadata.difffBuildSha=$SHA --config.extraMetadata.difffBuildTime=$TIME'"
+  },
+  "devDependencies": {
+    "electron": "^35.1.5",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "jp.difff.desktop",
+    "productName": "difff-pdf",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "cgi-bin/**/*",
+      "difff.pl",
+      "index.cgi",
+      "tools/**/*",
+      "!tools/.venv/**/*",
+      "!tools/__pycache__/**/*",
+      "static/**/*",
+      "favicon.ico",
+      "README.md",
+      "data/README.md",
+      ".htaccess"
+    ],
+    "asarUnpack": [
+      "cgi-bin/**/*",
+      "difff.pl",
+      "index.cgi",
+      "tools/**/*",
+      "static/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "hardenedRuntime": false
+    }
+  }
+}

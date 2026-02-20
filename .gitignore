@@ -3,3 +3,6 @@ cgi-bin/
 tools/.venv/
 tools/__pycache__/
 tools/.DS_Store
+node_modules/
+dist/
+data/tmp/

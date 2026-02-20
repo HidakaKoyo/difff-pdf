@@ -1,207 +1,182 @@
-difff《ﾃﾞｭﾌﾌ》
-======================
+# difff-pdf
 
-ウェブベースのテキスト比較ツールです。2つのテキストの差分をハイライト表示します。  
-日本語版に加え、英語版も公開されています（英語版URL: https://difff.jp/en/）。
+日本語版 `difff.pl` を中心にしたテキスト/PDF比較ツールです。
 
-稼働中サービス: https://difff.jp/
+- テキスト比較とPDF比較を**単一フォーム**で実行
+- 比較ボタンは1つ（PDF2本がある場合はPDF比較を優先）
+- PDF比較では `srcA/srcB/annA/annB/annComment` を出力
+- 旧「3日限定公開（save/delete）」機能は廃止
+- `en` ディレクトリは廃止（`/en/` は提供しない）
 
-![スクリーンショット](http://data.dbcls.jp/~meso/img/difff6.png "difff《ﾃﾞｭﾌﾌ》スクリーンショット")
+## 1. 必須コマンド
 
-## まず最初に（最短セットアップ）
+- `perl`
+- `diff`
+- `pdftotext`（`-bbox-layout` 利用）
+- `uv`
+- `node` / `npm`（Electron利用時）
 
-`difff.pl` は既存のテキスト比較に加えて、PDF2本アップロード比較（日本語版のみ）をサポートします。  
-Python補助処理は **すべて `uv run` 経由** で実行します。
-
-### 前提コマンド
-
-- `perl`（CGI実行用）
-- `diff`（既存テキスト差分）
-- `pdftotext`（PDFモード必須。`-bbox-layout` を使用）
-- `uv`（Python補助処理の実行）
-
-### セットアップ
+## 2. セットアップ
 
 ```bash
-cd /path/to/difff-pdf
-
-# Python依存を同期（tools/pyproject.toml + uv.lock）
+cd /Users/kh/MyWorkspace/difff-pdf
 uv sync --project tools --offline --no-python-downloads || uv sync --project tools
 ```
 
-オフライン運用時は、事前に必要ホイールをキャッシュしてから `--offline` を使ってください。
-
-### 開発用に起動
+## 3. Web版（CGI）起動
 
 ```bash
-cd /path/to/difff-pdf
-
-# http.server --cgi は /cgi-bin 配下のみ CGI 実行するため、起動前にリンクを作る
-mkdir -p cgi-bin
-ln -sf ../difff.pl cgi-bin/difff.pl
-ln -sf ../index.cgi cgi-bin/index.cgi
-ln -sf ../save.cgi cgi-bin/save.cgi
-ln -sf ../delete.cgi cgi-bin/delete.cgi
-
+cd /Users/kh/MyWorkspace/difff-pdf
 uv run --project tools python -m http.server --cgi 8000
 ```
 
-ブラウザで以下にアクセスします。
+開くURL:
 
 - `http://localhost:8000/cgi-bin/difff.pl`
-- または `http://localhost:8000/cgi-bin/index.cgi`
 
-必要に応じて送信先を固定したい場合は、起動前に以下を指定します。
+## 4. 操作フロー（統一UI）
 
-```bash
-export DIFFF_BASE_URL='http://localhost:8000/cgi-bin/'
-```
+1. `A/B` テキスト欄に入力（任意）
+2. `PDF A/B` を選択（任意）
+3. 「比較」を押下
 
-## 動作確認手順（立ち上げ確認を兼ねる）
+モード判定:
 
-### 1. テキスト比較（既存モード）
+- `pdfA` と `pdfB` が両方ある -> PDF比較
+- PDFが片側のみ -> エラー
+- PDFなしでテキストあり -> テキスト比較
+- テキストとPDF両方入力でもPDF2本ある -> PDF優先
 
-1. 画面上部のテキスト入力欄にA/Bを入力する  
-2. 「比較」を実行する  
-3. 差分ハイライトと文字数カウンタが表示されることを確認する
+## 5. 結果
 
-### 2. PDF比較（GUI）
+- 差分表（テキスト/PDF共通）
+- 統計（文字/空白/改行/単語）
+- PDFモード時のみ成果物リンク:
+  - `srcA.pdf`
+  - `srcB.pdf`
+  - `annA.pdf`
+  - `annB.pdf`
+  - `annComment.pdf`
 
-同じ画面内のPDFフォーム（`pdfA` / `pdfB`）で2本を指定して比較します。  
-成功すると、差分HTMLに加えて次のリンクが表示されます。
+## 6. 一時成果物
 
-- `annA.pdf`（A側の削除注釈）
-- `annB.pdf`（B側の追加注釈）
-- `annComment.pdf`（Aベース: 削除取り消し線 + 追加コメント注釈。右余白にコメント集約）
+PDF比較の成果物は `data/tmp/<token>/` に保存され、TTLで掃除されます。
 
-### 3. CLIスモークテスト（テキスト）
+- 掃除設定: `DIFFF_TMP_TTL_MINUTES`（既定 `120`）
 
-```bash
-cd /path/to/difff-pdf
-export QUERY_STRING="sequenceA=hogehoge&sequenceB=hagehage"
-./index.cgi
-```
+## 7. Electron（デスクトップ）
 
-先頭が `Content-type: text/html; charset=utf-8`、2行目が空行、3行目以降がHTMLなら基本動作OKです。
-
-### 4. Python補助スクリプトの構文確認（uv統一）
+### 7.1 インストール
 
 ```bash
-cd /path/to/difff-pdf
-uv run --project tools python -m py_compile tools/pdf_annotate_diff.py
+cd /Users/kh/MyWorkspace/difff-pdf
+npm install
 ```
 
-## PDFモード仕様（日本語版のみ）
+### 7.2 開発起動
 
-- 対象: `/Users/kh/MyWorkspace/difff-pdf/difff.pl`（英語版 `/Users/kh/MyWorkspace/difff-pdf/en/` は非対象）
-- 入力: `pdfA` と `pdfB` の両方が指定された場合のみ有効
-- 差分計算:
-  - `pdftotext -bbox-layout` の **XHTML** を起点に再構成テキストを作成
-  - 既存 `split_text` に通して比較（テキストモードと同じ分割規則）
-  - 赤線（削除側）はトークン単位に分割したbboxで描画し、1文字差分が単語全体の赤線にならないようにする
-  - 赤線（削除側）は前後 `DIFFF_DIFF_BRIDGE_CHARS` 文字拡張で連結判定し、同一行で接続した場合のみ1範囲に統合
-  - 拡張は判定専用で、連結しない場合は元の差分範囲を維持
-- 注釈成果物:
-  - `annotatedA.pdf`
-  - `annotatedB.pdf`
-  - `annotatedComment.pdf`
-- `annotatedComment.pdf` の描画仕様:
-  - ページ幅は元PDF + 180pt（右余白追加）
-  - 本文には追加箇所の上側に番号マークを配置し、下向きポインタで変更点を示す（横方向へ伸ばさない）
-  - 番号はコメント単位で採番（同一行に複数コメントがある場合も別番号）
-  - コメントの統合単位は削除赤線の統合結果（bridged deleted ranges）に追従
-  - コメントは「赤線グループ（置換）」と「B側の純追加」の双方を対象に生成し、削除のみ・空白のみ変更はコメント非表示
-  - コメント本文には必要に応じて赤線内の非差分文字を補完して、赤線と内容の対応を保つ
-  - コメント本文は右余白に全文表示
-  - 同一行で近接する複数コメントは1つに統合し、差分間の未変更トークンも含めて自然な連結文字列として表示
-  - フォントは 7pt から自動縮小し、最小 6pt までで収める
-  - 6pt でも収まらない場合は continuation ページを追加
-- 失敗時方針:
-  - bbox対応不能はベストエフォート（差分HTMLは返す）
-  - 実行失敗はエラーメッセージを返す
+```bash
+npm run electron:dev
+```
 
-## 環境変数
+Electronは内部でローカルCGIサーバを起動し、`/cgi-bin/difff.pl` を表示します。
+
+## 8. 配布ビルド（未署名・内部配布向け）
+
+```bash
+npm run electron:dist
+```
+
+出力先:
+
+- `dist/*.dmg`
+- `dist/*.zip`
+
+## 9. 再インストール前チェック
+
+1. 既存アプリ版数を確認:
+
+```bash
+defaults read /Applications/difff-pdf.app/Contents/Info CFBundleShortVersionString
+```
+
+2. BUILD識別子を確認（`difffBuildSha` / `difffBuildTime`）:
+
+```bash
+strings /Applications/difff-pdf.app/Contents/Resources/app.asar | rg -n 'difffBuildSha|difffBuildTime'
+```
+
+3. 期待する版数/BUILD_IDでなければ、アプリを置き換えて再インストール。
+
+## 10. 配布物検査（手動）
+
+```bash
+cd /Users/kh/MyWorkspace/difff-pdf
+TMP_DIR=$(mktemp -d)
+(
+  cd "$TMP_DIR" && \
+  ./node_modules/.bin/asar extract-file \
+    /Users/kh/MyWorkspace/difff-pdf/dist/mac-arm64/difff-pdf.app/Contents/Resources/app.asar \
+    electron/server.cjs && \
+  rg -n 'DIFFF_DESKTOP_READY_TIMEOUT_SEC|READY_MARKER_RE|compare-form|rootUrl' server.cjs
+)
+```
+
+## 11. トラブルシュート
+
+### 11.1 `CGI server did not become ready` が出る
+
+1. 起動ログを確認:
+
+```bash
+cat "$HOME/Library/Application Support/difff-pdf/logs/startup.log"
+```
+
+2. 既存ポート競合を疑う場合:
+
+```bash
+lsof -nP -iTCP:18765 -sTCP:LISTEN
+```
+
+3. ランタイムを掃除して再起動:
+
+```bash
+rm -rf "$HOME/Library/Application Support/difff-pdf/runtime"
+```
+
+4. それでも解消しない場合は、エラーダイアログに表示される `BUILD_ID` と `startup.log` を確認して版差分を切り分ける。
+
+## 12. 環境変数
 
 | 変数名 | 既定値 | 用途 |
 |---|---:|---|
-| `DIFFF_PDF_MAX_MB` | `50` | PDF1ファイルあたりの上限サイズ（MB） |
-| `DIFFF_TEXT_MAX_CHARS` | `5000000` | 抽出後テキスト長の上限 |
+| `DIFFF_PDF_MAX_MB` | `50` | PDF1ファイル上限(MB) |
+| `DIFFF_TEXT_MAX_CHARS` | `5000000` | 抽出/入力テキスト上限 |
 | `DIFFF_PDFTOTEXT_CMD` | `/opt/homebrew/bin/pdftotext` | `pdftotext` 実行パス |
-| `DIFFF_PDFTOTEXT_TIMEOUT_SEC` | `60` | `pdftotext` 実行タイムアウト秒 |
+| `DIFFF_PDFTOTEXT_TIMEOUT_SEC` | `60` | `pdftotext` タイムアウト |
 | `DIFFF_UV_CMD` | `/opt/homebrew/bin/uv` | `uv` 実行パス |
-| `DIFFF_UV_TIMEOUT_SEC` | `60` | `uv run` 実行タイムアウト秒 |
-| `DIFFF_DIFF_BRIDGE_CHARS` | `2` | 赤線（削除側）の近接差分を連結判定する前後拡張文字数（`0` で無効） |
-| `DIFFF_BASE_URL` | （自動判定） | CGIフォーム送信先のベースURL（末尾 `/` 推奨） |
-| `DIFFF_RETENTION_DAYS` | `3` | 公開結果の保持日数 |
-| `DIFFF_TMP_TTL_MINUTES` | `120` | `data/tmp` 一時成果物の保持分 |
-| `UV_PYTHON` | （任意） | `uv` で使うPythonを固定したい場合に指定 |
+| `DIFFF_UV_TIMEOUT_SEC` | `60` | `uv run` タイムアウト |
+| `DIFFF_DIFF_BRIDGE_CHARS` | `2` | 削除赤線ブリッジ判定文字数 |
+| `DIFFF_TMP_TTL_MINUTES` | `120` | `data/tmp` 掃除TTL |
+| `DIFFF_BASE_URL` | 自動判定 | CGIベースURL |
+| `DIFFF_DESKTOP_PORT` | `18765` | Electron優先ポート |
+| `DIFFF_DESKTOP_READY_TIMEOUT_SEC` | `120` | Electron ready判定タイムアウト |
+| `DIFFF_DESKTOP_STARTUP_TIMEOUT_SEC` | `120` | 旧名称（互換） |
+| `DIFFF_DESKTOP_UV_SYNC_TIMEOUT_SEC` | `180` | Electron起動時 `uv sync` タイムアウト |
+| `UV_PYTHON` | 任意 | `uv` のPython固定 |
 
-## 保存される成果物
+## 13. 検証コマンド
 
-PDF比較結果を公開保存すると、HTMLに加えて以下5ファイルを保存します。
-
-- `srcA.pdf`
-- `srcB.pdf`
-- `annA.pdf`
-- `annB.pdf`
-- `annComment.pdf`
-
-保存先 `data/` には、Webサーバからの読み書き権限を付与してください。  
-保持期間を過ぎた成果物は自動削除されます（`DIFFF_RETENTION_DAYS`）。
-
-## 従来の設置ポイント（CGI）
-
-`difff.pl` はCGIスクリプトです。`index.cgi` から呼び出すか、`difff.pl` を公開対象として配置します。  
-主に以下を環境に合わせて調整してください。
-
-```perl
-#!/usr/bin/perl
-my $url = 'https://example.com/' ;  # 保存結果から再投稿するための送信先
-my $diffcmd = '/usr/bin/diff' ;
-my $fifodir = '/tmp' ;
+```bash
+perl -c /Users/kh/MyWorkspace/difff-pdf/difff.pl
+uv run --project tools python -m py_compile /Users/kh/MyWorkspace/difff-pdf/tools/pdf_annotate_diff.py
+node --check /Users/kh/MyWorkspace/difff-pdf/electron/server.cjs
+node --check /Users/kh/MyWorkspace/difff-pdf/electron/main.cjs
 ```
-
-- `$url` は保存HTMLから再実行する運用が不要なら `./` でも可
-- `$fifodir` はWebサーバユーザーがFIFOを作成できるディレクトリを指定
-
-## 背景
-
-作者管理サイト（https://difff.jp/）は無償利用できますが、機密文書を社内サーバで比較したい要望向けにソースが公開されています。  
-比較処理は `diff` を使い、比較対象は一時ファイルではなくFIFO（名前付きパイプ）経由で受け渡します。
-
-## 更新履歴
-
-### 2017-08-07
-
-- HTTPSによる暗号化通信に対応
-
-### 2015-06-17
-
-- 結果公開機能を追加
-
-### 2013-03-21
-
-- 文字数カウンタ改良（空白・改行除外の文字数表示）
-- 単語数カウント追加
-
-### 2013-03-12
-
-- 入力フォーム直下に比較結果表示する構成に変更
-- 入力文書と比較結果を1つのHTMLとして保存・再開可能に
-- 文字数カウント機能追加
-- 配色を改良（カラー2/モノクロ切替）
-- 日本語処理を Perl5.8/UTF-8 に変更
-
-### 2013-01-11
-
-- 英語版を公開
-
-### 2012-10-22
-
-- difff ver.5 のソースをGitHub公開
 
 ## License
 
 Copyright &copy; 2004-2025 Yuki Naito
-([@meso_cacase](https://twitter.com/meso_cacase))  
+([@meso_cacase](https://twitter.com/meso_cacase))
+
 This software is distributed under [modified BSD license](https://www.opensource.org/licenses/bsd-license.php).

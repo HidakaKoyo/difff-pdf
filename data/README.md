@@ -1,13 +1,9 @@
-difff《ﾃﾞｭﾌﾌ》
-======================
+# data/
 
-このディレクトリは、ﾃﾞｭﾌﾌの結果を公開するときのHTML置き場です。
-このディレクトリ内にapacheから読み書き・実行できる権限を与えてください。
+日本語版 `difff-pdf` の実行時データ置き場です。
 
-ライセンス
---------
+- `data/tmp/` : PDF比較の一時成果物（TTLで自動掃除）
+- 旧公開保存機能（`save.cgi` / `delete.cgi`）は廃止済み
 
-Copyright &copy; 2004-2015 Yuki Naito
- ([@meso_cacase](http://twitter.com/meso_cacase))  
-This software is distributed under [modified BSD license]
- (http://www.opensource.org/licenses/bsd-license.php).
+Webサーバ（またはローカルCGI実行ユーザー）が `data/` と `data/tmp/` を
+読み書きできるように設定してください。

@@ -1,3 +1,2 @@
-RewriteEngine On
-RewriteCond %{REQUEST_URI} !data/
-RewriteRule ^([^/]*\.html) data/$1 [L]
+# difff-pdf (JP)
+# 公開保存機能を廃止したため、data/*.html へのRewriteは使用しない。

@@ -155,3 +155,33 @@ Thu Feb 19 00:17:42 2026 PDF annotate summary token=53egwveduj3m skipped_duplica
 WARN map_a token size mismatch map=5186 seq=5185 token=r89tphybsam6
 WARN map_b token size mismatch map=4750 seq=4749 token=r89tphybsam6
 Thu Feb 19 00:19:03 2026 PDF annotate summary token=r89tphybsam6 skipped_duplicates=160 map_a_miss=103 map_b_miss=65 comment_pages_extended=5 comment_min_font_used=7.0 comment_continuation_pages=0 comment_merged_groups=0 deleted_ranges_input=111 deleted_ranges_output=103 deleted_bridge_merges=8
+- 2026-02-19: 日本語版UIを単一フォーム化。`sequenceA/sequenceB/pdfA/pdfB` を1フォームで送信し、PDF2本がある場合はPDF比較優先とする判定へ変更。
+- 2026-02-19: `difff.pl` のインラインCSS/JSを撤去し、`static/app.css` `static/app.js` `static/icons.svg` へ分離。アイコン中心の結果/入力UIへ刷新。
+- 2026-02-19: 公開機能を廃止。`save.cgi` `delete.cgi` と `cgi-bin` の対応リンクを削除。
+- 2026-02-19: Electron最小シェルを追加（`electron/main.cjs` `electron/server.cjs` `electron/preload.cjs`）。`npm run electron:dev` と `electron:dist` の実行口を追加。
+WARN map_a token size mismatch map=5186 seq=5185 token=kdtvw3iingns
+WARN map_b token size mismatch map=4750 seq=4749 token=kdtvw3iingns
+Thu Feb 19 00:51:14 2026 PDF annotate summary token=kdtvw3iingns skipped_duplicates=160 map_a_miss=103 map_b_miss=65 comment_pages_extended=5 comment_min_font_used=7.0 comment_continuation_pages=0 comment_merged_groups=0 deleted_ranges_input=111 deleted_ranges_output=103 deleted_bridge_merges=8
+- 2026-02-19: `npm run electron:dist` を実行し、`dist/difff-pdf-0.1.0-arm64.dmg` と `dist/difff-pdf-0.1.0-arm64-mac.zip` の未署名配布物を生成。
+- 2026-02-19: 強制終了時にローカルCGI子プロセスが残るケースを確認。`main.cjs` に `SIGINT/SIGTERM` の明示クリーンアップ経路を追加（GUI終了操作での最終確認は継続）。
+WARN map_a token size mismatch map=5186 seq=5185 token=6ktpydkhugjw
+WARN map_b token size mismatch map=4750 seq=4749 token=6ktpydkhugjw
+Thu Feb 19 00:56:39 2026 PDF annotate summary token=6ktpydkhugjw skipped_duplicates=160 map_a_miss=103 map_b_miss=65 comment_pages_extended=5 comment_min_font_used=7.0 comment_continuation_pages=0 comment_merged_groups=0 deleted_ranges_input=111 deleted_ranges_output=103 deleted_bridge_merges=8
+- 2026-02-19: DMG起動時の `No such CGI script ('/cgi-bin/difff.pl')` 対策。Electron起動時に `app.asar.unpacked` をソースとして一時ランタイムディレクトリ（`difff-pdf-runtime-*`）を生成し、`cgi-bin` と必要資産を組み立ててから `http.server --cgi` を起動する方式へ変更。
+- 2026-02-19: DMG起動時の `tools/.venv` 依存崩れ（`libpython3.12.dylib` 不足）対策として、Electron起動前にランタイム側で `UV_PROJECT_ENVIRONMENT` を固定し `uv sync`（offline優先・失敗時通常sync）で実行環境を再構築する方式へ変更。パッケージには `tools/.venv` を同梱しない設定に更新。
+- 2026-02-19: 起動待機ロジックを改善。Ready判定を `/cgi-bin/difff.pl` からサーバルート `/` へ変更し、HTTP応答が返ることを起動条件化。`DIFFF_DESKTOP_STARTUP_TIMEOUT_SEC`（既定120秒）を導入し、遅い環境でもタイムアウトしにくくした。stderr詳細をタイムアウトエラーに含めるよう更新。
+- 2026-02-19: 恒久対策として `en/` ディレクトリを廃止し、`difff.pl` の `EN` 導線を削除。日本語版のみ提供へ統一。
+- 2026-02-19: `electron/server.cjs` を更新し、ready判定を二段階化（`/` 応答確認 + `/cgi-bin/difff.pl` で `id='compare-form'` マーカー検証）。判定失敗時にHTTP要約とstderrをエラーへ付与。
+- 2026-02-19: `DIFFF_DESKTOP_PORT` の競合時に空きポートへ自動フォールバックする処理を追加。`DIFFF_DESKTOP_READY_TIMEOUT_SEC`（互換で `DIFFF_DESKTOP_STARTUP_TIMEOUT_SEC` も受理）を導入。
+- 2026-02-19: 起動時 `uv sync` にタイムアウト（`DIFFF_DESKTOP_UV_SYNC_TIMEOUT_SEC`, default 180s）を導入し、timeout/失敗時のstdout+stderrを起動エラーへ反映。
+- 2026-02-19: 起動診断ログを `~/Library/Application Support/difff-pdf/logs/startup.log` に常設。`BUILD_ID`, source/runtime root, port, ready結果, child exit を記録。
+- 2026-02-19: `package.json` を `0.1.1` へ更新。`electron:dev`/`electron:dist` で `BUILD_ID` 構成要素（sha/time）を埋め込む運用へ変更。
+- 2026-02-19: `README.md` を再構成し、再インストール前チェック、配布物検査、起動失敗時のログ確認手順を追記。
+- 2026-02-19: 追加調査で root cause を特定。ready判定用 `http.request` が CGIレスポンスを strict parser で処理し `Parse Error: Invalid header value char` になっていたため、`insecureHTTPParser: true` を適用して待機判定を通るよう修正。
+- 2026-02-19: ポート競合判定の bind チェックが `127.0.0.1` 限定だったため、IPv6/全IF占有ケースで誤判定していた。bindチェックを全IFへ変更し、`port.fallback` が確実に発火するよう修正。
+- 2026-02-19: ready判定に `content-type: text/html` 条件を追加。静的 `difff.pl` ソース配信（text/plain）を誤って「ready」と判定するケースを防止。
+- 2026-02-19: macOS の runtime 配置を `~/Library/Application Support/difff-pdf/runtime` に統一し、`startup.log` の案内と実挙動を一致させた。
+WARN map_a token size mismatch map=5186 seq=5185 token=jgi9wm5my3vd
+WARN map_b token size mismatch map=4750 seq=4749 token=jgi9wm5my3vd
+Fri Feb 20 10:18:45 2026 PDF annotate summary token=jgi9wm5my3vd skipped_duplicates=160 map_a_miss=103 map_b_miss=65 comment_pages_extended=5 comment_min_font_used=7.0 comment_continuation_pages=0 comment_merged_groups=0 deleted_ranges_input=111 deleted_ranges_output=103 deleted_bridge_merges=8
+- 2026-02-19: 結果UIを調整。ハイライト配色切替（緑/モノクロ）を撤去して青表示固定に変更。PDF成果物リンクは下部セクションから結果ヘッダー（全画面ボタンと同列）へ移動し、タイトル表記を `pdf` に統一。

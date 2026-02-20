@@ -1,0 +1,32 @@
+<svg xmlns='http://www.w3.org/2000/svg' style='display:none'>
+  <symbol id='icon-spark' viewBox='0 0 24 24'>
+    <path d='M12 2l2.2 5.8L20 10l-5.8 2.2L12 18l-2.2-5.8L4 10l5.8-2.2L12 2zm8.5 12L22 18l-3 1.5L17.5 23 16 19.5 13 18l3-1.5 1.5-3L19 16l1.5-2zM4.5 14L6 18l-3 1.5L1.5 23 0 19.5-3 18l3-1.5 1.5-3L3 16l1.5-2z' />
+  </symbol>
+  <symbol id='icon-input' viewBox='0 0 24 24'>
+    <path d='M3 4h18v2H3V4zm0 7h12v2H3v-2zm0 7h18v2H3v-2zm15.2-9.8l1.6-1.6 3.2 3.2-1.6 1.6-3.2-3.2zM14 13.4l3.2-3.2 3.2 3.2-3.2 3.2H14v-3.2z'/>
+  </symbol>
+  <symbol id='icon-pdf' viewBox='0 0 24 24'>
+    <path d='M6 2h8l6 6v14H6V2zm8 1.5V9h5.5L14 3.5zM8.5 18.5h1.2v-1.4h.9c1.2 0 2-.7 2-1.9s-.8-1.9-2-1.9H8.5v5.2zm1.2-2.4v-1.8h.8c.5 0 .9.3.9.9s-.4.9-.9.9h-.8zm4.1 2.4h1.8c1.5 0 2.5-1 2.5-2.6s-1-2.6-2.5-2.6h-1.8v5.2zm1.2-1v-3.2h.5c.9 0 1.5.6 1.5 1.6s-.6 1.6-1.5 1.6H15z'/>
+  </symbol>
+  <symbol id='icon-play' viewBox='0 0 24 24'>
+    <path d='M8 5v14l11-7z'/>
+  </symbol>
+  <symbol id='icon-erase' viewBox='0 0 24 24'>
+    <path d='M16.3 3H9.2L2 12.2 9.7 21H17l5-5v-3.8L16.3 3zM10.2 19l-6-6.8L10 5h5.4l4.6 4.7V15L16.2 19h-6zM18 8l-8 8' stroke='currentColor' stroke-width='1.8' fill='none'/>
+  </symbol>
+  <symbol id='icon-info' viewBox='0 0 24 24'>
+    <path d='M12 2a10 10 0 110 20 10 10 0 010-20zm-1 8h2v7h-2v-7zm0-3h2v2h-2V7z'/>
+  </symbol>
+  <symbol id='icon-diff' viewBox='0 0 24 24'>
+    <path d='M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm13 0h3v6h-6v-3h3v-3zM11 6h2v2h-2V6zm0 4h2v2h-2v-2zm0 4h2v2h-2v-2zm0 4h2v2h-2v-2z'/>
+  </symbol>
+  <symbol id='icon-focus' viewBox='0 0 24 24'>
+    <path d='M4 9V4h5v2H6v3H4zm10-5h6v6h-2V6h-4V4zM4 15h2v3h3v2H4v-5zm14 3v-3h2v5h-5v-2h3z'/>
+  </symbol>
+  <symbol id='icon-palette' viewBox='0 0 24 24'>
+    <path d='M12 3a9 9 0 100 18h2a3 3 0 003-3c0-.8-.3-1.5-.8-2h2.3a3.5 3.5 0 000-7H17A5 5 0 0012 3zM7 11a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm3-4a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm5 1a1.5 1.5 0 110-3 1.5 1.5 0 010 3z'/>
+  </symbol>
+  <symbol id='icon-folder' viewBox='0 0 24 24'>
+    <path d='M2 6h8l2 2h10v10a2 2 0 01-2 2H4a2 2 0 01-2-2V6zm2 4v8h16v-8H4z'/>
+  </symbol>
+</svg>

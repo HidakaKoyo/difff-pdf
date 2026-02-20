@@ -9,6 +9,7 @@
 # 2013-03-07 Yuki Naito (@meso_cacase) 日本語処理をPerl5.8/UTF-8に変更
 # 2013-03-12 Yuki Naito (@meso_cacase) ver.6 トップページを本CGIと統合
 # 2015-06-17 Yuki Naito (@meso_cacase) ver.6.1 結果を公開する機能を追加
+# 2026-02-19 UI統合リデザイン + 公開機能廃止 + Electron連携前提の構成へ更新
 
 use warnings ;
 use strict ;
@@ -29,7 +30,6 @@ my $tmpdir  = "$datadir/tmp" ;
 
 my $pdf_max_mb                = get_env_int('DIFFF_PDF_MAX_MB', 50) ;
 my $text_max_chars            = get_env_int('DIFFF_TEXT_MAX_CHARS', 5000000) ;
-my $retention_days            = get_env_int('DIFFF_RETENTION_DAYS', 3) ;
 my $tmp_ttl_minutes           = get_env_int('DIFFF_TMP_TTL_MINUTES', 120) ;
 my $pdftotext_timeout_sec     = get_env_int('DIFFF_PDFTOTEXT_TIMEOUT_SEC', 60) ;
 my $uv_timeout_sec            = get_env_int('DIFFF_UV_TIMEOUT_SEC', 60) ;
@@ -37,189 +37,67 @@ my $diff_bridge_chars         = get_env_int('DIFFF_DIFF_BRIDGE_CHARS', 2) ;
 my $pdftotext_cmd             = $ENV{'DIFFF_PDFTOTEXT_CMD'} // '/opt/homebrew/bin/pdftotext' ;
 my $uv_cmd                    = $ENV{'DIFFF_UV_CMD'} // '/opt/homebrew/bin/uv' ;
 my $data_url                  = build_data_url($url) ;
+my $static_url                = build_static_url($url) ;
 
 binmode STDOUT, ':utf8' ;        # 標準出力をUTF-8エンコード
 binmode STDERR, ':utf8' ;        # 標準エラー出力をUTF-8エンコード
 
-# PDFアップロード比較モード（multipart/form-data + mode=pdf）
-if (is_pdf_request()){
-	process_pdf_request() ;
+my $sequenceA = '' ;
+my $sequenceB = '' ;
+my $cgi = CGI->new ;
+
+cleanup_tmp_artifacts() ;
+
+$sequenceA = $cgi->param('sequenceA') // '' ;
+$sequenceB = $cgi->param('sequenceB') // '' ;
+utf8::decode($sequenceA) unless utf8::is_utf8($sequenceA) ;
+utf8::decode($sequenceB) unless utf8::is_utf8($sequenceB) ;
+
+my $upload_a = $cgi->upload('pdfA') ;
+my $upload_b = $cgi->upload('pdfB') ;
+my $has_pdf_a = defined $upload_a ;
+my $has_pdf_b = defined $upload_b ;
+my $has_text  = ($sequenceA ne '' or $sequenceB ne '') ;
+
+(length($sequenceA) <= $text_max_chars)
+	or print_html("ERROR : input too large (A > $text_max_chars)") ;
+(length($sequenceB) <= $text_max_chars)
+	or print_html("ERROR : input too large (B > $text_max_chars)") ;
+
+if (($has_pdf_a and not $has_pdf_b) or (not $has_pdf_a and $has_pdf_b)){
+	print_html('ERROR : 2つのPDFを指定してください') ;
+}
+
+if ($has_pdf_a and $has_pdf_b){
+	process_pdf_request($cgi) ;
 	exit ;
 }
 
-# ▼ HTTPリクエストからクエリを取得し整形してFIFOに送る
-my %query = get_query_parameters() ;
-
-my $sequenceA = $query{'sequenceA'} // '' ;
-utf8::decode($sequenceA) ;  # utf8フラグを有効にする
-
-my $sequenceB = $query{'sequenceB'} // '' ;
-utf8::decode($sequenceB) ;  # utf8フラグを有効にする
-
-# 両方とも空欄のときはトップページを表示
-$sequenceA eq '' and $sequenceB eq '' and print_html() ;
-
-my $fifopath_a = "$fifodir/difff.$$.A" ;  # $$はプロセスID
-my @a_split = split_text( escape_char($sequenceA) ) ;
-my $a_split = join("\n", @a_split) . "\n" ;
-fifo_send($a_split, $fifopath_a) ;
-
-my $fifopath_b = "$fifodir/difff.$$.B" ;  # $$はプロセスID
-my @b_split = split_text( escape_char($sequenceB) ) ;
-my $b_split = join("\n", @b_split) . "\n" ;
-fifo_send($b_split, $fifopath_b) ;
-# ▲ HTTPリクエストからクエリを取得し整形してFIFOに送る
-
-# ▼ diffコマンドの実行
-(-e $diffcmd) or print_html("ERROR : $diffcmd : not found") ;
-(-x $diffcmd) or print_html("ERROR : $diffcmd : not executable") ;
-my @diffout = `$diffcmd -d $fifopath_a $fifopath_b` ;
-my @diffsummary = grep /(^[^<>-]|<\$>)/, @diffout ;
-# ▲ diffコマンドの実行
-
-# ▼ 差分の検出とHTMLタグの埋め込み
-my ($a_start, $a_end, $b_start, $b_end) = (0, 0, 0, 0) ;
-foreach (@diffsummary){  # 異なる部分をハイライト表示
-	if ($_ =~ /^((\d+),)?(\d+)c(\d+)(,(\d+))?$/){       # 置換している場合
-		$a_end   = $3 || 0 ;
-		$a_start = $2 || $a_end ;
-		$b_start = $4 || 0 ;
-		$b_end   = $6 || $b_start ;
-		$a_split[$a_start - 1] = '<em>' . ($a_split[$a_start - 1] // '') ;
-		$a_split[$a_end - 1]  .= '</em>' ;
-		$b_split[$b_start - 1] = '<em>' . ($b_split[$b_start - 1] // '') ;
-		$b_split[$b_end - 1]  .= '</em>' ;
-	} elsif ($_ =~ /^((\d+),)?(\d+)d(\d+)(,(\d+))?$/){  # 欠失している場合
-		$a_end   = $3 || 0 ;
-		$a_start = $2 || $a_end ;
-		$b_start = $4 || 0 ;
-		$b_end   = $6 || $b_start ;
-		$a_split[$a_start - 1] = '<em>' . ($a_split[$a_start - 1] // '') ;
-		$a_split[$a_end - 1]  .= '</em>' ;
-	} elsif ($_ =~ /^((\d+),)?(\d+)a(\d+)(,(\d+))?$/){  # 挿入している場合
-		$a_end   = $3 || 0 ;
-		$a_start = $2 || $a_end ;
-		$b_start = $4 || 0 ;
-		$b_end   = $6 || $b_start ;
-		$b_split[$b_start - 1] = '<em>' . ($b_split[$b_start - 1] // '') ;
-		$b_split[$b_end - 1]  .= '</em>' ;
-	} elsif ($_ =~ /> <\$>/){  # 改行の数をあわせる処理
-		my $i = ($a_start > 1) ? $a_start - 2 : 0 ;
-		while ($i < @a_split and not $a_split[$i] =~ s/<\$>/<\$><\$>/){ $i ++ }
-	} elsif ($_ =~ /< <\$>/){  # 改行の数をあわせる処理
-		my $i = ($b_start > 1) ? $b_start - 2 : 0 ;
-		while ($i < @b_split and not $b_split[$i] =~ s/<\$>/<\$><\$>/){ $i ++ }
-	}
-}
-# ▲ 差分の検出とHTMLタグの埋め込み
-
-# ▼ 比較結果のブロックを生成してHTMLを出力
-my $a_final = join '', @a_split ;
-my $b_final = join '', @b_split ;
-
-# 変更箇所が<td>をまたぐ場合の処理、該当箇所がなくなるまで繰り返し適用
-while ( $a_final =~ s{(<em>[^<>]*)<\$>(([^<>]|<\$>)*</em>)}{$1</em><\$><em>$2}g ){}
-while ( $b_final =~ s{(<em>[^<>]*)<\$>(([^<>]|<\$>)*</em>)}{$1</em><\$><em>$2}g ){}
-
-my @a_final = split /<\$>/, $a_final ;
-my @b_final = split /<\$>/, $b_final ;
-
-my $par = (@a_final > @b_final) ? @a_final : @b_final ;
-
-my $table = '' ;
-foreach (0..$par-1){
-	defined $a_final[$_] or $a_final[$_] = '' ;
-	defined $b_final[$_] or $b_final[$_] = '' ;
-	$a_final[$_] =~ s{(\ +</em>)}{escape_space($1)}ge ;
-	$b_final[$_] =~ s{(\ +</em>)}{escape_space($1)}ge ;
-	$table .=
-"<tr>
-	<td>$a_final[$_]</td>
-	<td>$b_final[$_]</td>
-</tr>
-" ;
+if ($has_text){
+	process_text_request($sequenceA, $sequenceB) ;
+	exit ;
 }
 
-#- ▽ 文字数をカウントしてtableに付加
-my ($count1_A, $count2_A, $count3_A, $wcount_A) = count_char($sequenceA) ;
-my ($count1_B, $count2_B, $count3_B, $wcount_B) = count_char($sequenceB) ;
-
-$table .= <<"--EOS--" ;
-<tr>
-	<td><font color=gray>
-		文字数: $count1_A<br>
-		空白数: @{[$count2_A - $count1_A]} 空白込み文字数: $count2_A<br>
-		改行数: @{[$count3_A - $count2_A]} 改行込み文字数: $count3_A<br>
-		単語数: $wcount_A
-	</font></td>
-	<td><font color=gray>
-		文字数: $count1_B<br>
-		空白数: @{[$count2_B - $count1_B]} 空白込み文字数: $count2_B<br>
-		改行数: @{[$count3_B - $count2_B]} 改行込み文字数: $count3_B<br>
-		単語数: $wcount_B
-	</font></td>
-</tr>
---EOS--
-#- △ 文字数をカウントしてtableに付加
-
-my $message = <<"--EOS--" ;
-<div id=result>
-<table cellspacing=0>
-$table</table>
-
-<p>
-	<input type=button id=hide value='結果のみ表示 (印刷用)' onclick='hideForm()'> |
-	<input type=radio name=color value=1 onclick='setColor1()' checked>
-		<span class=blue >カラー1</span>
-	<input type=radio name=color value=2 onclick='setColor2()'>
-		<span class=green>カラー2</span>
-	<input type=radio name=color value=3 onclick='setColor3()'>
-		<span class=black>モノクロ</span>
-</p>
-</div>
-
-<div id=save>
-<hr><!-- ________________________________________ -->
-
-<h4>この結果を公開する</h4>
-
-<form method=POST id=save name=save action='${url}save.cgi'>
-<p>この結果をﾃﾞｭﾌﾌサーバに保存し、公開用のURLを発行します。<br>
-削除パスワードを設定しておけば、あとで消すこともできます。<br>
-<b>公開期間は${retention_days}日間です。</b>公開期間を過ぎると自動的に削除されます。</p>
-
-<table id=passwd>
-<tr>
-	<td class=n>削除バスワード：<input type=text name=passwd size=10 value=''></td>
-	<td class=n>設定したパスワードは後で確認することが<br>できませんので必ず控えてください。</td>
-</tr>
-</table>
-
-<input type=submit onclick='return savehtml();' value='結果を公開する'>
-
-<p>「結果を公開する」を押さない限り、入力した文書などがサーバに保存されることはありません。<br>
-この機能はテスト運用中のものです。予告なく提供を中止することがあります。</p>
-</form>
-</div>
---EOS--
-
-print_html($message) ;
-# ▲ 比較結果のブロックを生成してHTMLを出力
-
+print_html() ;
 exit ;
 
 # ====================
-sub is_pdf_request {
-	return 0 unless defined $ENV{'CONTENT_TYPE'} ;
-	return ($ENV{'CONTENT_TYPE'} =~ m{multipart/form-data}i) ? 1 : 0 ;
+sub process_text_request {
+	my ($seq_a, $seq_b) = @_ ;
+	my $ctx = build_diff_context($seq_a, $seq_b) ;
+	my $table = append_count_row($ctx->{'table'}, $seq_a, $seq_b) ;
+	my $message = build_result_section(
+		mode      => 'text',
+		table     => $table,
+		asset_root => '',
+	) ;
+	$sequenceA = $seq_a ;
+	$sequenceB = $seq_b ;
+	print_html($message) ;
 } ;
 # ====================
 sub process_pdf_request {
-	cleanup_tmp_artifacts() ;
-
-	my $cgi = CGI->new ;
-	(($cgi->param('mode') // '') eq 'pdf')
-		or print_html('ERROR : invalid pdf mode') ;
+	my $cgi = $_[0] // CGI->new ;
 
 	my $upload_a = $cgi->upload('pdfA') ;
 	my $upload_b = $cgi->upload('pdfB') ;
@@ -368,82 +246,81 @@ sub process_pdf_request {
 			)
 	) ;
 
-	my $table = $ctx->{'table'} ;
-	my ($count1_A, $count2_A, $count3_A, $wcount_A) = count_char($sequence_a) ;
-	my ($count1_B, $count2_B, $count3_B, $wcount_B) = count_char($sequence_b) ;
-	$table .= <<"--EOS--" ;
-<tr>
-	<td><font color=gray>
-		文字数: $count1_A<br>
-		空白数: @{[$count2_A - $count1_A]} 空白込み文字数: $count2_A<br>
-		改行数: @{[$count3_A - $count2_A]} 改行込み文字数: $count3_A<br>
-		単語数: $wcount_A
-	</font></td>
-	<td><font color=gray>
-		文字数: $count1_B<br>
-		空白数: @{[$count2_B - $count1_B]} 空白込み文字数: $count2_B<br>
-		改行数: @{[$count3_B - $count2_B]} 改行込み文字数: $count3_B<br>
-		単語数: $wcount_B
-	</font></td>
-</tr>
---EOS--
-
+	my $table = append_count_row($ctx->{'table'}, $sequence_a, $sequence_b) ;
 	$sequenceA = $sequence_a ;
 	$sequenceB = $sequence_b ;
-
 	my $asset_root = "${data_url}tmp/$token" ;
-	my $message = <<"--EOS--" ;
-<div id=result>
-<table cellspacing=0>
-$table</table>
-
-<p>
-	<input type=button id=hide value='結果のみ表示 (印刷用)' onclick='hideForm()'> |
-	<input type=radio name=color value=1 onclick='setColor1()' checked>
-		<span class=blue >カラー1</span>
-	<input type=radio name=color value=2 onclick='setColor2()'>
-		<span class=green>カラー2</span>
-	<input type=radio name=color value=3 onclick='setColor3()'>
-		<span class=black>モノクロ</span>
-</p>
-
-<p><b>PDF成果物:</b><br>
-<a href='$asset_root/sourceA.pdf' target='_blank'>srcA.pdf</a> /
-<a href='$asset_root/sourceB.pdf' target='_blank'>srcB.pdf</a> /
-<a href='$asset_root/annotatedA.pdf' target='_blank'>annA.pdf</a> /
-<a href='$asset_root/annotatedB.pdf' target='_blank'>annB.pdf</a> /
-<a href='$asset_root/annotatedComment.pdf' target='_blank'>annComment.pdf</a>
-</p>
-</div>
-
-<div id=save>
-<hr><!-- ________________________________________ -->
-
-<h4>この結果を公開する</h4>
-
-<form method=POST id=save name=save action='${url}save.cgi'>
-<input type=hidden name=mode value='pdf'>
-<input type=hidden name=pdf_token value='$token'>
-<p>この結果をﾃﾞｭﾌﾌサーバに保存し、公開用のURLを発行します。<br>
-削除パスワードを設定しておけば、あとで消すこともできます。<br>
-<b>公開期間は${retention_days}日間です。</b>公開期間を過ぎると自動的に削除されます。</p>
-
-<table id=passwd>
-<tr>
-	<td class=n>削除バスワード：<input type=text name=passwd size=10 value=''></td>
-	<td class=n>設定したパスワードは後で確認することが<br>できませんので必ず控えてください。</td>
-</tr>
-</table>
-
-<input type=submit onclick='return savehtml();' value='結果を公開する'>
-
-<p>「結果を公開する」を押さない限り、入力した文書などがサーバに保存されることはありません。<br>
-この機能はテスト運用中のものです。予告なく提供を中止することがあります。</p>
-</form>
-</div>
---EOS--
-
+	my $message = build_result_section(
+		mode      => 'pdf',
+		table     => $table,
+		asset_root => $asset_root,
+	) ;
 	print_html($message) ;
+} ;
+# ====================
+sub append_count_row {
+	my ($table, $seq_a, $seq_b) = @_ ;
+	$table //= '' ;
+	$seq_a //= '' ;
+	$seq_b //= '' ;
+	my ($count1_A, $count2_A, $count3_A, $wcount_A) = count_char($seq_a) ;
+	my ($count1_B, $count2_B, $count3_B, $wcount_B) = count_char($seq_b) ;
+	$table .= <<"--EOS--" ;
+<tr class='stats-row'>
+	<td>
+		<div class='stats-item'>字: $count1_A / 単語: $wcount_A</div>
+		<div class='stats-item'>空白: @{[$count2_A - $count1_A]} / 改行: @{[$count3_A - $count2_A]}</div>
+	</td>
+	<td>
+		<div class='stats-item'>字: $count1_B / 単語: $wcount_B</div>
+		<div class='stats-item'>空白: @{[$count2_B - $count1_B]} / 改行: @{[$count3_B - $count2_B]}</div>
+	</td>
+</tr>
+--EOS--
+	return $table ;
+} ;
+# ====================
+sub build_result_section {
+	my %args = @_ ;
+	my $mode = $args{'mode'} // 'text' ;
+	my $table = $args{'table'} // '' ;
+	my $asset_root = $args{'asset_root'} // '' ;
+	my $mode_label = ($mode eq 'pdf') ? 'PDF' : 'Text' ;
+
+	my $pdf_tools_html = '' ;
+	if ($mode eq 'pdf' and $asset_root ne ''){
+		$pdf_tools_html = <<"--EOS--" ;
+	<div class='pdf-tools' aria-label='PDF成果物'>
+		<div class='pdf-tools-title'><svg class='i'><use href='${static_url}icons.svg#icon-folder'></use></svg> pdf</div>
+		<div class='pdf-tools-links'>
+			<a href='$asset_root/sourceA.pdf' target='_blank' rel='noopener'>srcA</a>
+			<a href='$asset_root/sourceB.pdf' target='_blank' rel='noopener'>srcB</a>
+			<a href='$asset_root/annotatedA.pdf' target='_blank' rel='noopener'>annA</a>
+			<a href='$asset_root/annotatedB.pdf' target='_blank' rel='noopener'>annB</a>
+			<a href='$asset_root/annotatedComment.pdf' target='_blank' rel='noopener'>annComment</a>
+		</div>
+	</div>
+--EOS--
+	}
+
+	return <<"--EOS--" ;
+<section class='result-card' id='result-card' data-mode='$mode'>
+		<div class='result-head'>
+			<h2><svg class='i'><use href='${static_url}icons.svg#icon-diff'></use></svg> $mode_label</h2>
+			<div class='result-tools'>
+				<button type='button' class='icon-btn' id='print-view-btn' aria-label='結果のみ表示' title='結果のみ表示'>
+					<svg class='i'><use href='${static_url}icons.svg#icon-focus'></use></svg>
+				</button>
+				$pdf_tools_html
+			</div>
+		</div>
+		<div class='result-table-wrap'>
+			<table class='diff-table' cellspacing='0'>
+				$table
+			</table>
+		</div>
+</section>
+--EOS--
 } ;
 # ====================
 sub build_diff_context {
@@ -792,30 +669,11 @@ sub build_data_url {
 	return "${base}/data/" ;
 } ;
 # ====================
-sub get_query_parameters {  # CGIが受け取ったパラメータの処理
-my $buffer = '' ;
-if (defined $ENV{'REQUEST_METHOD'} and
-	$ENV{'REQUEST_METHOD'} eq 'POST' and
-	defined $ENV{'CONTENT_LENGTH'}
-){
-	eval 'read(STDIN, $buffer, $ENV{"CONTENT_LENGTH"})' or
-	print_html('ERROR : get_query_parameters() : read failed') ;
-} elsif (defined $ENV{'QUERY_STRING'}){
-	$buffer = $ENV{'QUERY_STRING'} ;
-}
-length $buffer > 5000000 and print_html('ERROR : input too large') ;
-my %query ;
-my @query = split /&/, $buffer ;
-foreach (@query){
-	my ($name, $value) = split /=/ ;
-	if (defined $name and defined $value){
-		$value =~ tr/+/ / ;
-		$value =~ s/%([a-fA-F0-9][a-fA-F0-9])/pack('C', hex($1))/eg ;
-		$name  =~ s/%([a-fA-F0-9][a-fA-F0-9])/pack('C', hex($1))/eg ;
-		$query{$name} = $value ;
-	}
-}
-return %query ;
+sub build_static_url {
+	my $base = $_[0] // './' ;
+	$base =~ s{(cgi-bin|htbin)/$}{} ;
+	$base =~ m{/$} and return "${base}static/" ;
+	return "${base}/static/" ;
 } ;
 # ====================
 sub split_text {  # 比較する単位ごとに文字列を分割してリストに格納
@@ -888,249 +746,104 @@ return ($count1, $count2, $count3, $wcount) ;
 } ;
 # ====================
 sub print_html {  # HTMLを出力
+	my $message = $_[0] // '' ;
 
-#- ▼ メモ
-# ・比較結果ページを出力（デフォルト）
-# ・引数が ERROR で始まる場合はエラーページを出力
-# ・引数がない場合はトップページを出力
-#- ▲ メモ
+	if ($message =~ /^(ERROR.*)$/s){
+		$message = "<section class='result-card notice-card error'><h2>エラー</h2><p>$1</p></section>" ;
+	}
 
-my $message = $_[0] // '' ;
-
-#- ▼ エラーページ：引数が ERROR で始まる場合
-$message =~ s{^(ERROR.*)$}{<p><font color=red>$1</font></p>}s ;
-#- ▲ エラーページ：引数が ERROR で始まる場合
-
-#- ▼ トップページ：引数がない場合
-(not $message) and $message = <<'--EOS--'
-<div id=news>
-<p>新着情報：</p>
-
-<ul>
-	<li>2017-08-07　HTTPSによる暗号化通信に対応 -
-		<a href='https://difff.jp/'>https://difff.jp/</a>
-	<li>2015-06-17　ﾃﾞｭﾌﾌの結果を公開する機能を追加 (ver.6.1) -
-		<a target='_blank' href='http://data.dbcls.jp/~meso/meme/archives/2957'>
-			説明</a>
-	<li>2014-03-14　トップページURLを <a href='http://difff.jp/'>http://difff.jp/</a> に変更
-	<li>2014-03-12　ITmediaニュース -
-		<a target='_blank' href='http://www.itmedia.co.jp/news/articles/1403/12/news121.html'>
-			STAP細胞問題で活躍、テキスト比較ツール「デュフフ」とは</a>
-	<li>2013-12-12　使い方の動画 -
-		<a target='_blank' href='http://togotv.dbcls.jp/20130828.html'>
-			difff《ﾃﾞｭﾌﾌ》を使って文章の変更箇所を調べる</a>
-	<li>2013-03-12　全面リニューアル (ver.6) -
-		<a target='_blank' href='http://data.dbcls.jp/~meso/meme/archives/2313'>
-			変更点</a>
-	<li>2013-01-11　<a href='https://difff.jp/en/'>英語版</a> を公開
-	<li>2012-10-22　ソースを公開 -
-		<a target='_blank' href='https://github.com/meso-cacase/difff'>
-			GitHub</a>
-	<li>2012-04-16　GIGAZINE -
-		<a target='_blank' href='http://gigazine.net/news/20120416-difff/'>
-			日本語対応で簡単に差分が確認できるテキスト比較ツール「difff(ﾃﾞｭﾌﾌ)」</a>
-	<li>2012-04-13　全面リニューアル。左右で段落がずれないようにした (ver.5)
-	<li>2008-02-18　日本語対応 (ver.4)
-	<li>2004-02-19　初代 difff 完成 (ver.1)
-</ul>
-</div>
-
-<hr><!-- ________________________________________ -->
-
-<p><font color=gray>Last modified on Apr 28, 2025 by
-<a target='_blank' href='http://twitter.com/meso_cacase'>@meso_cacase</a>
-</font></p>
+	if (not $message){
+		$message = <<"--EOS--" ;
+<section class='result-card empty-card'>
+	<h2><svg class='i'><use href='${static_url}icons.svg#icon-spark'></use></svg> Ready</h2>
+</section>
 --EOS--
 
-and $sequenceA = <<'--EOS--'
-下記の文章を比較してください。
-   Betty Botter bought some butter, 
-But, she said, this butter's bitter;
-If I put it in my batter,
-It will make my batter bitter,
-But a bit of better butter
-Will make my batter better.
-So she bought a bit of butter
-Better than her bitter butter,
-And she put it in her batter,
-And it made her batter better,
-So 'twas better Betty Botter
-Bought a bit of better butter.
+		$sequenceA = <<'--EOS--' ;
+契約書の改訂版を比較するときは、ここにA案を貼り付けます。
+改行と空白も比較対象です。
 --EOS--
-
-and $sequenceB = <<'--EOS--' ;
-下記の文章を，ﾋﾋ較してくだちい．
-Betty Botter bought some butter,
-But, she said, the butter's bitter;
-If I put it in my batter,
-That will make my batter bitter.
-But a bit of better butter, 
-That will make my batter better.
-So she bought a bit of butter
-Better than her bitter butter.
-And she put it in her batter,
-And it made her batter better.
-So it was better Betty Botter
-Bought a bit of better butter.
+		$sequenceB = <<'--EOS--' ;
+契約書の改訂版を比較するときは、ここにB案を貼り付けます。
+改行と空白も比較対象になります。
 --EOS--
-#- ▲ トップページ：引数がない場合
+	}
 
-#- ▼ HTML出力
-$sequenceA = escape_char($sequenceA) ;  # XSS対策
-$sequenceB = escape_char($sequenceB) ;  # XSS対策
+	$sequenceA = escape_char($sequenceA // '') ;
+	$sequenceB = escape_char($sequenceB // '') ;
 
-my $html = <<"--EOS--" ;
-<!DOCTYPE HTML PUBLIC '-//W3C//DTD HTML 4.01 Transitional//EN'>
-<html lang=ja>
-
+	my $html = <<"--EOS--" ;
+<!DOCTYPE html>
+<html lang='ja'>
 <head>
-<meta http-equiv='Content-Type' content='text/html; charset=utf-8'>
-<meta http-equiv='Content-Script-Type' content='text/javascript'>
-<meta http-equiv='Content-Style-Type' content='text/css'>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
 <meta name='author' content='Yuki Naito'>
-<title>difff《ﾃﾞｭﾌﾌ》</title>
-<script type='text/javascript'>
-<!--
-	function hideForm() {
-		if (document.getElementById('form').style.display == 'none') {
-			document.getElementById('top' ).style.display = 'block';
-			document.getElementById('form').style.display = 'block';
-			document.getElementById('save').style.display = 'block';
-			document.getElementById('hide').value = '結果のみ表示 (印刷用)';
-		} else {
-			document.getElementById('top' ).style.display = 'none';
-			document.getElementById('form').style.display = 'none';
-			document.getElementById('save').style.display = 'none';
-			document.getElementById('hide').value = '全体を表示';
-		}
-	}
-	function setColor1() {
-		document.getElementById('top').style.borderTop = '5px solid #00BBFF';
-		var emList = document.getElementsByTagName('em');
-		for (i = 0; i < emList.length; i++) {
-			emList[i].className = 'blue' ;
-		}
-	}
-	function setColor2() {
-		document.getElementById('top').style.borderTop = '5px solid #00bb00';
-		var emList = document.getElementsByTagName('em');
-		for (i = 0; i < emList.length; i++) {
-			emList[i].className = 'green' ;
-		}
-	}
-	function setColor3() {
-		document.getElementById('top').style.borderTop = '5px solid black';
-		var emList = document.getElementsByTagName('em');
-		for (i = 0; i < emList.length; i++) {
-			emList[i].className = 'black' ;
-		}
-	}
-	function savehtml() {
-		var element1 = document.createElement('input');
-		element1.setAttribute('type', 'hidden');
-		element1.setAttribute('name', 'sequenceA');
-		element1.setAttribute('value', document.difff.sequenceA.value);
-		document.save.appendChild(element1);
-
-		var element2 = document.createElement('input');
-		element2.setAttribute('type', 'hidden');
-		element2.setAttribute('name', 'sequenceB');
-		element2.setAttribute('value', document.difff.sequenceB.value);
-		document.save.appendChild(element2);
-
-		return confirm('本当に公開してもいいですか？\\n[OK] → 結果を公開し、そのページに移動します。');
-	}
-//-->
-</script>
-<style type='text/css'>
-<!--
-	* { font-family:verdana,arial,helvetica,sans-serif }
-	p,table,textarea,ul { font-size:10pt }
-	textarea { width:100% }
-	a  { color:#3366CC }
-	.k { color:black; text-decoration:none }
-	em { font-style:normal }
-	em,
-	.blue  { font-weight:bold; color:black; background:#99EEFF; border:1px solid #00BBFF }
-	.green { font-weight:bold; color:black; background:#99FF99; border:none }
-	.black { font-weight:bold; color:white; background:black;   border:none }
-	table {
-		width:95%;
-		margin:20px;
-		table-layout:fixed;
-		word-wrap:break-word;
-		border-collapse:collapse;
-	}
-	td {
-		padding:4px 15px;
-		border-left:solid 1px silver;
-		border-right:solid 1px silver;
-	}
-	table#passwd {
-		width:auto;
-		border:dotted 1px #8c93ba;
-	}
-	.n { border:none }
--->
-</style>
+<title>difff-pdf</title>
+<link rel='icon' href='${url}../favicon.ico'>
+<link rel='stylesheet' href='${static_url}app.css'>
+<script defer src='${static_url}app.js'></script>
 </head>
+<body class='theme-blue'>
+<div class='app-shell' id='app-shell'>
+		<header class='app-header' id='app-header'>
+			<div class='brand'>
+				<svg class='i i-lg'><use href='${static_url}icons.svg#icon-spark'></use></svg>
+				<div>
+					<h1>difff-pdf</h1>
+				</div>
+			</div>
+		</header>
 
-<body>
+	<main class='app-main'>
+			<section class='workspace-card' id='workspace-card'>
+				<div class='workspace-head'>
+					<h2><svg class='i'><use href='${static_url}icons.svg#icon-input'></use></svg> Input</h2>
+				</div>
+			<form method='POST' id='compare-form' name='compare' action='${url}difff.pl' enctype='multipart/form-data'>
+				<div class='text-grid'>
+					<label class='field-card' for='sequenceA'>
+						<span class='field-title'>A</span>
+						<textarea id='sequenceA' name='sequenceA' rows='13' placeholder='テキストA'>$sequenceA</textarea>
+					</label>
+					<label class='field-card' for='sequenceB'>
+						<span class='field-title'>B</span>
+						<textarea id='sequenceB' name='sequenceB' rows='13' placeholder='テキストB'>$sequenceB</textarea>
+					</label>
+				</div>
+				<div class='pdf-grid'>
+					<label class='file-card' for='pdfA'>
+						<svg class='i'><use href='${static_url}icons.svg#icon-pdf'></use></svg>
+						<span>PDF A</span>
+						<input id='pdfA' type='file' name='pdfA' accept='application/pdf'>
+					</label>
+					<label class='file-card' for='pdfB'>
+						<svg class='i'><use href='${static_url}icons.svg#icon-pdf'></use></svg>
+						<span>PDF B</span>
+						<input id='pdfB' type='file' name='pdfB' accept='application/pdf'>
+					</label>
+				</div>
+				<div class='actions'>
+					<button type='submit' class='primary-btn' aria-label='比較実行' title='比較実行'>
+						<svg class='i'><use href='${static_url}icons.svg#icon-play'></use></svg>
+						比較
+					</button>
+					<button type='button' class='ghost-btn' id='clear-btn' aria-label='入力クリア' title='入力クリア'>
+						<svg class='i'><use href='${static_url}icons.svg#icon-erase'></use></svg>
+						クリア
+					</button>
+				</div>
+				</form>
+			</section>
 
-<div id=top style='border-top:5px solid #00BBFF; padding-top:10px'>
-<font size=5>
-	<a class=k href='$url'>
-	テキスト比較ツール difff《ﾃﾞｭﾌﾌ》</a></font><!--
---><font size=3>ver.6.1</font>
-&emsp;
-<font size=1 style='vertical-align:16px'>
-	<a href='${url}en/'>English</a> |
-	Japanese
-</font>
-&emsp;
-<font size=1 style='vertical-align:16px'>
-<a href='${url}v5/'>旧バージョン (ver.5)</a>
-</font>
-<hr><!-- ________________________________________ -->
+		$message
+	</main>
 </div>
-
-<div id=form>
-<p>下の枠に比較したい文章を入れてくだちい。差分 (diff) を表示します。</p>
-
-<form method=POST id=difff name=difff action='${url}difff.pl'>
-<table cellspacing=0>
-<tr>
-	<td class=n><textarea name=sequenceA rows=20>$sequenceA</textarea></td>
-	<td class=n><textarea name=sequenceB rows=20>$sequenceB</textarea></td>
-</tr>
-</table>
-
-<p><input type=submit value='比較する'></p>
-</form>
-
-<hr>
-<p>PDF同士を比較する場合は、下のフォームから2つのPDFを選択してください。</p>
-<form method=POST id=pdfdiff name=pdfdiff action='${url}difff.pl' enctype='multipart/form-data'>
-<input type=hidden name=mode value='pdf'>
-<table cellspacing=0>
-<tr>
-	<td class=n>PDF A: <input type=file name=pdfA accept='application/pdf'></td>
-	<td class=n>PDF B: <input type=file name=pdfB accept='application/pdf'></td>
-</tr>
-</table>
-<p><input type=submit value='PDFを比較する'></p>
-</form>
-</div>
-
-$message
-
 </body>
 </html>
 --EOS--
 
-print "Content-type: text/html; charset=utf-8\n\n$html" ;
-#- ▲ HTML出力
-
-exit ;
+	print "Content-type: text/html; charset=utf-8\n\n$html" ;
+	exit ;
 } ;
 # ====================
