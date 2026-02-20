@@ -52,3 +52,4 @@
 - 修正: `insecureHTTPParser: true` を適用し、`content-type=text/html` かつ `compare-form` マーカーを満たす場合のみ ready と判定。
 - 競合修正: ポート可用性判定の bind を全IFに変更し、IPv6占有時でも `port.fallback` が発動することを確認。
 - 補足: macOS runtime も `~/Library/Application Support/difff-pdf/runtime` に寄せ、ログ案内と実配置を一致させた。
+- 2026-02-20 追記: READMEに `example.png` を追加し、テスト用PDFを `public/A-base.pdf` / `public/B-mod.pdf` に統一。

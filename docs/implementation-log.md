@@ -185,3 +185,5 @@ WARN map_a token size mismatch map=5186 seq=5185 token=jgi9wm5my3vd
 WARN map_b token size mismatch map=4750 seq=4749 token=jgi9wm5my3vd
 Fri Feb 20 10:18:45 2026 PDF annotate summary token=jgi9wm5my3vd skipped_duplicates=160 map_a_miss=103 map_b_miss=65 comment_pages_extended=5 comment_min_font_used=7.0 comment_continuation_pages=0 comment_merged_groups=0 deleted_ranges_input=111 deleted_ranges_output=103 deleted_bridge_merges=8
 - 2026-02-19: 結果UIを調整。ハイライト配色切替（緑/モノクロ）を撤去して青表示固定に変更。PDF成果物リンクは下部セクションから結果ヘッダー（全画面ボタンと同列）へ移動し、タイトル表記を `pdf` に統一。
+- 2026-02-20: READMEに `example.png`（`annComment.pdf` 出力例）を追加。
+- 2026-02-20: テスト用PDFを `public/A-base.pdf` / `public/B-mod.pdf` へ差し替え（旧 `public/テスト用_変更前A.pdf` / `public/テスト用_変更後B.pdf` を廃止）。

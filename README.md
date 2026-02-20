@@ -58,6 +58,10 @@ uv run --project tools python -m http.server --cgi 8000
   - `annB.pdf`
   - `annComment.pdf`
 
+annComment.pdf の出力例:
+
+![annComment output example](example.png)
+
 ## 6. 一時成果物
 
 PDF比較の成果物は `data/tmp/<token>/` に保存され、TTLで掃除されます。
